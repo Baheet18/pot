@@ -1,0 +1,25 @@
+import Link from "next/link";
+import type { MarketView } from "@pot/server";
+import { fmtPrice, fmtTime, fmtUsd } from "@pot/core";
+import { VerdictBadge } from "./VerdictBadge";
+import { SplitBar } from "./SplitBar";
+
+export function MarketCard({ v }: { v: MarketView }) {
+  const m = v.market;
+  return (
+    <Link href={`/m/${m.id}`} className="card block p-4 hover:border-amber-400/40">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <h3 className="font-semibold leading-snug">{m.title}</h3>
+        <VerdictBadge kind={v.verdict.kind} />
+      </div>
+      <p className="mb-3 text-sm text-stone-300">{v.verdict.line}</p>
+      <SplitBar yesSplit={v.verdict.numbers.yesSplit} label={v.verdict.numbers.splitBasis === "real-money" ? "real money" : undefined} />
+      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-400">
+        <div>YES {fmtPrice(m.yesPrice)} · NO {fmtPrice(m.noPrice)}</div>
+        <div>Pot {fmtUsd(m.totalVolumeUsdc)}</div>
+        <div>{v.verdict.numbers.realWallets} real wallets</div>
+      </div>
+      <div className="mt-2 text-xs text-stone-500">{v.buyable ? (v.sandbox ? "Buying open (sandbox fixture)" : `Buying open · closes ${fmtTime(m.primaryPhaseEndTime ?? m.startTime)}`) : "Buying closed"}</div>
+    </Link>
+  );
+}

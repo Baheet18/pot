@@ -1,0 +1,17 @@
+{
+  "name": "pot",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p packages/core && tsc -p packages/server && tsc -p apps/bot && tsc -p apps/web --noEmit",
+    "dev:web": "npm run dev -w @pot/web",
+    "dev:bot": "npm run dev -w @pot/bot",
+    "build": "npm run build -w @pot/web"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^3",
+    "@types/node": "^20"
+  }
+}

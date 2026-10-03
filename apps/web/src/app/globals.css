@@ -1,0 +1,4 @@
+@import "tailwindcss";
+:root { color-scheme: dark; }
+body { background: radial-gradient(1200px 600px at 15% -10%, #3b1d0b 0%, #0b0a09 55%) fixed, #0b0a09; color: #f1ece4; }
+.card { border: 1px solid rgb(255 255 255 / 0.1); background: rgb(255 255 255 / 0.03); border-radius: 1rem; }

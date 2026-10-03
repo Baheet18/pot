@@ -1,0 +1,165 @@
+{
+ "GET /markets/": {
+  "items": [
+   {
+    "marketId": "TestMarket1111111111111111111111111111111",
+    "category": "crypto",
+    "title": "Sandbox test market",
+    "description": "Fixture market for pk_test_… keys. Not on mainnet.",
+    "images": [],
+    "phase": "primary",
+    "marketType": "standard",
+    "startTime": "2026-01-01T00:00:00Z",
+    "endTime": "2026-12-31T23:59:59Z",
+    "resolutionTime": "2027-01-01T00:00:00Z",
+    "region": "Global",
+    "resolved": false,
+    "status": "primary",
+    "volumeUsdc": "0.00",
+    "campaignId": null,
+    "createdByPartner": false,
+    "yesPrice": "0.50",
+    "noPrice": "0.50",
+    "primaryYesPrice": "0.50",
+    "primaryNoPrice": "0.50",
+    "secondaryYesPrice": null,
+    "secondaryNoPrice": null
+   }
+  ],
+  "nextCursor": null,
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "GET /markets/TestMarket1111111111111111111111111111111/trades/": {
+  "marketId": "TestMarket1111111111111111111111111111111",
+  "items": [],
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "GET /markets/TestMarket1111111111111111111111111111111/": {
+  "marketId": "TestMarket1111111111111111111111111111111",
+  "category": "crypto",
+  "title": "Sandbox test market",
+  "description": "Fixture market for pk_test_… keys. Not on mainnet.",
+  "images": [],
+  "phase": "primary",
+  "marketType": "standard",
+  "startTime": "2026-01-01T00:00:00Z",
+  "endTime": "2026-12-31T23:59:59Z",
+  "resolutionTime": "2027-01-01T00:00:00Z",
+  "region": "Global",
+  "resolved": false,
+  "status": "primary",
+  "volumeUsdc": "0.00",
+  "campaignId": null,
+  "createdByPartner": false,
+  "yesPrice": "0.50",
+  "noPrice": "0.50",
+  "primaryYesPrice": "0.50",
+  "primaryNoPrice": "0.50",
+  "secondaryYesPrice": null,
+  "secondaryNoPrice": null,
+  "creatorAddress": "TestWallet11111111111111111111111111111111",
+  "onChain": null,
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "GET /positions/": {
+  "wallet": "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW",
+  "positions": [],
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /primaryorderquote/": {
+  "quoteId": "qt_sandbox_test",
+  "marketId": "TestMarket1111111111111111111111111111111",
+  "wallet": "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW",
+  "side": "yes",
+  "amountUsdc": "1.00",
+  "shares": "2.00",
+  "feeUsdc": "0.00",
+  "expiresAt": "2099-01-01T00:00:00Z",
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /primaryorderbuild/": {
+  "orderId": "ord_sandbox_test",
+  "quoteId": "qt_sandbox_test",
+  "wallet": "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW",
+  "instructions": [],
+  "recentBlockhash": "SandboxBlockhash11111111111111111111111111111",
+  "lastValidBlockHeight": 0,
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /primaryordersubmit/": {
+  "orderId": "ord_sandbox_test",
+  "status": "submitted",
+  "signature": "sandboxSignature1111111111111111111111111111111111111111111",
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /primaryorderverify/": {
+  "orderId": "ord_sandbox_test",
+  "status": "confirmed",
+  "signature": "sandboxSignature1111111111111111111111111111111111111111111",
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /trades/": {
+  "signature": "sandbox_recording1",
+  "status": "attributed",
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "GET /wallets/BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW/trades/": {
+  "wallet": "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW",
+  "items": [],
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /markets/create/quote/": {
+  "createId": "cr_sandbox_test",
+  "userId": "usr_wIF6EKug3DsASGwOy9mVCA",
+  "apiKeyId": "key_ND1xkTI6QnHpxyxjZ1WQFg",
+  "expectedEventPda": "TestMarket1111111111111111111111111111111",
+  "paymentUsdc": "50000000",
+  "liquidityInjectionUsdc": "10000000",
+  "platformRevenueUsdc": "40000000",
+  "marketType": "standard",
+  "expiresAt": "2099-01-01T00:00:00Z",
+  "blockhashExpiryHintSec": 60,
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /markets/create/build/": {
+  "transaction": "",
+  "buildFingerprint": "sandbox",
+  "expectedEventPda": "TestMarket1111111111111111111111111111111",
+  "recentBlockhash": "SandboxBlockhash11111111111111111111111111111",
+  "lastValidBlockHeight": 0,
+  "expiresAt": "2099-01-01T00:00:00Z",
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /markets/register/": {
+  "status": "registered",
+  "marketId": "TestMarket1111111111111111111111111111111",
+  "createId": "cr_sandbox_test",
+  "signature": "sandboxSignature1111111111111111111111111111111111111111111",
+  "paymentUsdc": "50.00",
+  "paymentUsdcBase": "50000000",
+  "category": "crypto",
+  "title": "Sandbox test market",
+  "images": [],
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /claim/build/": {
+  "wallet": "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW",
+  "marketId": "TestMarket1111111111111111111111111111111",
+  "outcome": "YES",
+  "winningShares": "0",
+  "instructions": [],
+  "derived": {},
+  "recentBlockhash": "SandboxBlockhash11111111111111111111111111111",
+  "lastValidBlockHeight": 0,
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ },
+ "POST /claim/creator-fees/build/": {
+  "wallet": "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW",
+  "marketId": "TestMarket1111111111111111111111111111111",
+  "claimableFeesUsdc": "0",
+  "instructions": [],
+  "recentBlockhash": "SandboxBlockhash11111111111111111111111111111",
+  "lastValidBlockHeight": 0,
+  "disclaimer": "Test mode: this response uses sandbox fixtures and does not access Solana mainnet."
+ }
+}

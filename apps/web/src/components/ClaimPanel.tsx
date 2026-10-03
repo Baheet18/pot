@@ -1,0 +1,33 @@
+"use client";
+import { useState } from "react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { WalletProviders } from "./WalletProviders";
+import { api, signSendConfirm } from "./sign";
+
+function Inner({ marketId, kind, sandbox, liveWrites }: { marketId: string; kind: "win" | "creator"; sandbox: boolean; liveWrites: boolean }) {
+  const { connection } = useConnection();
+  const { publicKey, signTransaction } = useWallet();
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!sandbox && !liveWrites) return <p className="text-sm text-amber-200">Live claims are switched off in this preview build.</p>;
+  async function claim() {
+    if (!publicKey || !signTransaction) return;
+    setBusy(true); setMsg("");
+    try {
+      const b = await api<{ transaction: string; winningShares: string | null; claimableFeesUsdc: number | null }>("/api/pot/claim/build", { marketId, kind, wallet: publicKey.toBase58() });
+      const sig = await signSendConfirm(connection, b.transaction, signTransaction);
+      if (kind === "win") await api("/api/pot/claim/report", { marketId, wallet: publicKey.toBase58(), signature: sig }).catch(() => undefined);
+      setMsg(`✅ Claimed. Signature ${sig}`);
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="space-y-3">
+      {!publicKey ? <WalletMultiButton /> : <button disabled={busy} onClick={claim} className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black disabled:opacity-50">{busy ? "Working…" : kind === "win" ? "Claim my winnings" : "Claim creator royalty"}</button>}
+      {msg && <div className="break-all text-sm">{msg}</div>}
+    </div>
+  );
+}
+export function ClaimPanel(p: { marketId: string; kind: "win" | "creator"; sandbox: boolean; liveWrites: boolean; rpc: string }) {
+  return <WalletProviders rpc={p.rpc}><Inner {...p} /></WalletProviders>;
+}
