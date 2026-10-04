@@ -107,3 +107,19 @@ describe("Pot bot", () => {
     expect(verify<{ u: number; a: string }>(new URL(url).searchParams.get("t"))).toMatchObject({ u: 42, a: "link" });
   });
 });
+
+describe("errors never escape (webhook mode)", () => {
+  it("swallows Telegram API failures and never exposes the token", async () => {
+    const { createBot: mk } = await import("../src/bot");
+    const bot = mk("123456:TEST_TOKEN_NOT_REAL_xxxxxxxxxxxxxxxxxxxx", { botInfo: { id: 1, is_bot: true, first_name: "Pot", username: "pantapotbot" } as any });
+    bot.api.config.use(async () => ({ ok: false, error_code: 400, description: "Bad Request: chat not found" }) as any);
+    const logs: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => { logs.push(a.map(String).join(" ")); };
+    try {
+      await expect(bot.handleUpdate({ update_id: 1, message: { message_id: 1, date: 0, chat: { id: 5, type: "private", first_name: "x" }, from: { id: 5, is_bot: false, first_name: "x" }, text: "/help", entities: [{ type: "bot_command", offset: 0, length: 5 }] } } as any)).resolves.toBeUndefined();
+    } finally { console.error = orig; }
+    expect(logs.join("\n")).toContain("chat not found");
+    expect(logs.join("\n")).not.toContain("TEST_TOKEN_NOT_REAL");
+  });
+});

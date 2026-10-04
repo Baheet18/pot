@@ -23,6 +23,12 @@ export const COMMANDS = [
   { command: "help", description: "How Pot works" },
 ];
 
+/** Short, token-free error text for logs. */
+export function safeErr(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  return m.replace(/\d{6,}:[A-Za-z0-9_-]{30,}/g, "[token]").slice(0, 300);
+}
+
 const shortW = (w: string) => `${w.slice(0, 4)}…${w.slice(-4)}`;
 const usd = (x: number | null | undefined) => (x === null || x === undefined || !Number.isFinite(x) ? "—" : `$${x >= 100 ? Math.round(x).toLocaleString("en-US") : x.toFixed(2)}`);
 const SANDBOX_NOTE = SANDBOX ? "\n\n🧪 <i>Sandbox mode: test data, no real money moves.</i>" : "";
@@ -83,6 +89,16 @@ export function draftPreview(d: MarketDraft, problems: string[]): string {
 export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {}) {
   const bot = new Bot(token, opts.botInfo ? { botInfo: opts.botInfo } : undefined);
   const botUser = () => bot.botInfo?.username ?? "pantapotbot";
+
+  // Error boundary first: in webhook mode grammY rethrows middleware errors, and its error objects carry the
+  // full context (including the API token). Never let them escape or get logged; log only a short message.
+  bot.use(async (_ctx, next) => {
+    try {
+      await next();
+    } catch (e) {
+      console.error("[bot] handler error:", safeErr(e));
+    }
+  });
 
   bot.use(async (ctx, next) => {
     if (ctx.from && !ctx.from.is_bot) await upsertMember(ctx.from.id, ctx.from.username ? `@${ctx.from.username}` : [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" "));
@@ -273,7 +289,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   });
 
   bot.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
-  bot.catch((err) => console.error("[bot] handler error:", err.error instanceof Error ? err.error.message : String(err.error)));
+  bot.catch((err) => console.error("[bot] handler error:", safeErr(err.error)));
   return bot;
 }
 
@@ -289,7 +305,7 @@ export async function notifyTick(bot: Bot) {
       const fresh = b.new_to_panta ? " · 🎉 first ever Panta trade for this wallet" : b.new_to_pot ? " · first Pot buy for this wallet" : "";
       await bot.api.sendMessage(b.chat_id!, `${b.side === "yes" ? "🟩" : "🟥"} ${shortW(b.wallet)} bought <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)} on <b>${esc(title)}</b>${who}${pot}${fresh}${SANDBOX ? " 🧪" : ""}`, { parse_mode: "HTML" });
     } catch (e) {
-      console.error("[bot] notify failed:", (e as Error).message);
+      console.error("[bot] notify failed:", safeErr(e));
     }
   }
 }
@@ -310,7 +326,7 @@ export async function settleTick(bot: Bot) {
         await bot.api.sendMessage(r.chat_id, `🔒 Buying closed on <b>${esc(v.market.title)}</b>. Final pot ${usd(v.market.totalVolumeUsdc)}. ${r.created_by_group ? `Creator royalty ≈ ${usd(v.royalty.estimatedUsdc)} (/admin).` : ""}`, { parse_mode: "HTML" });
       }
     } catch (e) {
-      console.error("[bot] settle notify failed:", (e as Error).message);
+      console.error("[bot] settle notify failed:", safeErr(e));
     }
   }
 }

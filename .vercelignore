@@ -17,3 +17,5 @@ shots/.create_url
 *wallet*.json
 .panta
 .pot
+.agents
+skills-lock.json

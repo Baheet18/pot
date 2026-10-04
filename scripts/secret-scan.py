@@ -2,7 +2,7 @@
 """Scan the repo (incl. .next build output and data/, excluding node_modules) for any of our secret values. Prints only file names."""
 import os, json, sys
 secrets = {}
-for name, path in [("panta live key", "~/.panta/api_key"), ("panta test key", "~/.panta/test_key"), ("telegram token", "~/.pot/telegram_token"), ("hmac secret", "~/.pot/hmac_secret")]:
+for name, path in [("panta live key", "~/.panta/api_key"), ("panta test key", "~/.panta/test_key"), ("telegram token", "~/.pot/telegram_token"), ("hmac secret", "~/.pot/hmac_secret"), ("webhook secret", "~/.pot/webhook_secret"), ("cron secret", "~/.pot/cron_secret")]:
     try:
         v = open(os.path.expanduser(path)).read().strip()
         if v: secrets[name] = v.encode()

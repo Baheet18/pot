@@ -28,3 +28,5 @@ shots/.create_url
 *.db-shm
 .vercel
 .env*
+.agents/
+skills-lock.json
