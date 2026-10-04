@@ -82,7 +82,7 @@ export function draftPreview(d: MarketDraft, problems: string[]): string {
   ];
   if (d.warnings.length) lines.push("", "⚠️ " + d.warnings.map(esc).join("\n⚠️ "));
   if (problems.length) lines.push("", "❌ <b>Can't create yet:</b> " + problems.map(esc).join("; "));
-  lines.push("", "<i>Not right? Send /new again with the fix, e.g. <code>/new Nigeria beat Benin | Fri 17:00</code></i>");
+  lines.push("", "<i>Not right? Send /new again with the fix, e.g. <code>/new Nigeria beat Benin | Fri 17:00</code> or <code>/new Trump out as President | before 2027</code></i>");
   return lines.join("\n") + SANDBOX_NOTE;
 }
 

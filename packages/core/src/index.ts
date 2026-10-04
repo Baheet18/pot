@@ -9,3 +9,4 @@ export * from "./royalty";
 export * from "./card";
 export * from "./actions";
 export * from "./practice";
+export * from "./deadline";
