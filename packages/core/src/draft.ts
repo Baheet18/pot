@@ -12,7 +12,7 @@ import { exactWat, findDeadline, longDate, watParts, watTime } from "./deadline"
 export const WAT_OFFSET_MIN = 60;
 export const PANTA_CATEGORIES = ["sports", "crypto", "politics", "entertainment", "finance", "science", "world", "other"] as const;
 export type PantaCategory = (typeof PANTA_CATEGORIES)[number];
-export type DraftKind = "match" | "scorer" | "price" | "reality" | "office" | "election" | "generic";
+export type DraftKind = "match" | "scorer" | "price" | "reality" | "office" | "election" | "generic" | "ai";
 
 export interface MarketDraft {
   kind: DraftKind;
@@ -32,6 +32,10 @@ export interface MarketDraft {
   creationFeeUsdc: number;
   /** Things the admin should check before paying. */
   warnings: string[];
+  /** Who wrote it: the AI drafter (Gemini) or the basic rule-based fallback. */
+  drafter?: "ai" | "rules";
+  /** Problems that block creation (e.g. disallowed content, already decided). */
+  blockers?: string[];
 }
 
 export interface DraftOptions {
@@ -467,6 +471,10 @@ export function validateDraft(d: MarketDraft, now = Math.floor(Date.now() / 1000
   if (!d.eventInProgress && d.startTime - now < LIMITS.minStartDelaySec) errs.push("start must be at least 1 hour from now");
   if (d.eventInProgress && d.marketType !== "breaking") errs.push("event-in-progress is only allowed for breaking markets");
   if (d.marketType === "breaking" && d.startTime - now > LIMITS.breakingWindowSec) errs.push("breaking markets must start within 72h");
+  if (d.marketType === "standard" && d.startTime - now < LIMITS.breakingWindowSec - 3600) errs.push("standard markets must start more than ~72h from now (use breaking)");
+  if (d.creationFeeUsdc !== LIMITS.fees[d.marketType]) errs.push("fee doesn't match the market type");
+  if (d.sourcesOfTruth.some((u) => !/^https:\/\/[^\s/$.?#].[^\s]*$/i.test(u))) errs.push("sources must be https links");
+  for (const b of d.blockers ?? []) errs.push(b);
   return errs;
 }
 

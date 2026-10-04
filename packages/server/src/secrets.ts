@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
  * Secrets are read at runtime (never inlined into a bundle) from, in order:
  *  1. chmod-600 files (local box / self-hosting; paths may come from env), or
  *  2. server-only encrypted env vars on Vercel: POT_PANTA_TEST_KEY, POT_PANTA_LIVE_KEY,
- *     POT_TELEGRAM_TOKEN, POT_HMAC_SECRET, POT_TELEGRAM_WEBHOOK_SECRET.
+ *     POT_TELEGRAM_TOKEN, POT_HMAC_SECRET, POT_TELEGRAM_WEBHOOK_SECRET, POT_GEMINI_KEY.
  * Nothing here ever logs a secret value.
  */
 const home = homedir();
@@ -16,6 +16,7 @@ export const SECRET_PATHS = {
   pantaTest: process.env.PANTA_TEST_KEY_FILE || path.join(home, ".panta", "test_key"),
   telegram: process.env.POT_TELEGRAM_TOKEN_FILE || path.join(home, ".pot", "telegram_token"),
   hmac: process.env.POT_HMAC_SECRET_FILE || path.join(home, ".pot", "hmac_secret"),
+  gemini: process.env.POT_GEMINI_KEY_FILE || path.join(home, ".pot", "gemini_key"),
 };
 
 const memo = new Map<string, string>();
@@ -73,6 +74,15 @@ export function telegramWebhookSecret(): string | null {
   if (v && /^[A-Za-z0-9_-]{32,256}$/.test(v)) return v;
   try {
     return readSecret(path.join(home, ".pot", "webhook_secret"), (s) => /^[A-Za-z0-9_-]{32,256}$/.test(s), "Webhook secret");
+  } catch {
+    return null;
+  }
+}
+
+/** Gemini API key for AI market drafting (file ~/.pot/gemini_key or env POT_GEMINI_KEY). Null when not set up. */
+export function geminiKey(): string | null {
+  try {
+    return readSecret(SECRET_PATHS.gemini, (s) => /^[A-Za-z0-9._-]{20,200}$/.test(s), "Gemini key", "POT_GEMINI_KEY");
   } catch {
     return null;
   }

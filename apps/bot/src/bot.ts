@@ -1,10 +1,10 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import { draftMarket, esc, fmtWat, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
+import { esc, findDeadline, fmtWat, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
-  walletsFor, blinkFor, WEB_URL, listOpenViews, type MarketView,
+  walletsFor, blinkFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
 /**
@@ -14,6 +14,7 @@ import {
  */
 export const COMMANDS = [
   { command: "new", description: "Draft a market: /new Will Nigeria beat Benin Fri 5pm?" },
+  { command: "edit", description: "Tweak your draft: /edit ends 31 May 2027 23:00" },
   { command: "markets", description: "Markets in this group" },
   { command: "share", description: "Your personal share links for a market" },
   { command: "top", description: "Leaderboard: who brought new traders" },
@@ -71,22 +72,32 @@ export function cardFor(view: MarketView, ref: Ref): Card {
 
 export function draftPreview(d: MarketDraft, problems: string[]): string {
   const lines = [
-    "📝 <b>Market draft</b>",
+    d.drafter === "rules" ? "📝 <b>Market draft</b> · 🛠 <i>basic drafter (AI unavailable)</i>" : "📝 <b>Market draft</b> · 🤖 <i>written by AI, please check it</i>",
     `<b>Question:</b> ${esc(d.question)}`,
     `<b>Rule:</b> ${esc(d.resolutionRule)}`,
     `<b>Sources:</b> ${d.sourcesOfTruth.map(esc).join(", ")}`,
     `<b>Buying closes:</b> ${esc(fmtWat(d.startTime))}`,
     `<b>Event ends:</b> ${esc(fmtWat(d.endTime))}`,
+    `<b>Result by:</b> ${esc(fmtWat(d.resolutionTime))}`,
     `<b>Type:</b> ${d.marketType}${d.eventInProgress ? " (event in progress)" : ""} · fee $${d.creationFeeUsdc} · category ${d.category} · region ${esc(d.region)}`,
     `<b>You earn:</b> up to 20% of the pot as creator royalty (less if 90%+ of traders pick one side).`,
   ];
   if (d.warnings.length) lines.push("", "⚠️ " + d.warnings.map(esc).join("\n⚠️ "));
   if (problems.length) lines.push("", "❌ <b>Can't create yet:</b> " + problems.map(esc).join("; "));
-  lines.push("", "<i>Not right? Send /new again with the fix, e.g. <code>/new Nigeria beat Benin | Fri 17:00</code> or <code>/new Trump out as President | before 2027</code></i>");
+  lines.push("", "<i>Want changes? Reply to this message with what to change (e.g. \"make the deadline 30 June 2027\"), or use <code>/edit ends 31 May 2027 23:00</code>. Fields: " + EDIT_FIELDS.join(", ") + ".</i>");
   return lines.join("\n") + SANDBOX_NOTE;
 }
 
-export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {}) {
+const draftKeyboard = (id: string, d: MarketDraft, problems: string[]) => {
+  const kb = new InlineKeyboard();
+  if (!problems.length) kb.text(`✅ Create ($${d.creationFeeUsdc})`, `create:${id}`);
+  return kb.text("❌ Cancel", `cancel:${id}`);
+};
+
+export type Drafter = (text: string, extra?: { previous?: MarketDraft; instruction?: string }) => Promise<DraftResult>;
+
+export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafter?: Drafter } = {}) {
+  const drafter: Drafter = opts.drafter ?? ((text, extra) => draftWithAI(text, extra));
   const bot = new Bot(token, opts.botInfo ? { botInfo: opts.botInfo } : undefined);
   const botUser = () => bot.botInfo?.username ?? "pantapotbot";
 
@@ -127,19 +138,63 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   bot.command("new", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     if (!(await isAdmin(ctx))) return ctx.reply("Only group admins can create markets. Ask an admin, or DM me to try it yourself.");
-    let draft: MarketDraft;
+    const text = ctx.message?.text ?? "";
+    if (!text.replace(/^\/new(@\w+)?/i, "").trim()) return ctx.reply("Tell me the market idea, e.g. /new Will PSG win the Champions League this season?");
+    await ctx.replyWithChatAction("typing").catch(() => undefined);
+    let r: DraftResult;
     try {
-      draft = draftMarket(ctx.message?.text ?? "");
+      r = await drafter(text);
     } catch (e) {
       return ctx.reply((e as Error).message);
     }
+    if (r.kind === "clarify") return ctx.reply(`🤔 ${r.question}\n\nSend /new again with a bit more detail.`);
+    const draft = r.draft;
     const problems = validateDraft(draft);
     const row = await saveDraft(ctx.chat.id, ctx.from.id, draft);
-    const kb = new InlineKeyboard();
-    if (!problems.length) kb.text(`✅ Create ($${draft.creationFeeUsdc})`, `create:${row.id}`);
-    kb.text("❌ Cancel", `cancel:${row.id}`);
-    const msg = await ctx.reply(draftPreview(draft, problems), { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+    const msg = await ctx.reply(draftPreview(draft, problems), { parse_mode: "HTML", reply_markup: draftKeyboard(row.id, draft, problems), link_preview_options: { is_disabled: true } });
     await updateDraft(row.id, { message_id: msg.message_id });
+  });
+
+  /** Save an edited draft and refresh its preview (edit in place; send a new one if that fails). */
+  async function showEdited(ctx: Context, rowId: string, chatId: number, messageId: number | null, d: MarketDraft) {
+    const problems = validateDraft(d);
+    await updateDraft(rowId, { draft: d, status: "draft" });
+    const text = "✏️ <b>Updated.</b>\n" + draftPreview(d, problems);
+    const extra = { parse_mode: "HTML" as const, reply_markup: draftKeyboard(rowId, d, problems), link_preview_options: { is_disabled: true } };
+    if (messageId) {
+      try { await ctx.api.editMessageText(chatId, Number(messageId), text, extra); return; } catch { /* fall through: send fresh */ }
+    }
+    const m = await ctx.reply(text, extra);
+    await updateDraft(rowId, { message_id: m.message_id });
+  }
+
+  async function editableDraft(ctx: Context) {
+    if (!ctx.chat || !ctx.from) return null;
+    const replyTo = ctx.message?.reply_to_message?.message_id;
+    const row = replyTo ? await draftByMessage(ctx.chat.id, replyTo) : await latestOpenDraft(ctx.chat.id, ctx.from.id);
+    if (!row) return null;
+    if (Number(row.admin_id) !== ctx.from.id) { await ctx.reply("Only the admin who drafted this can change it."); return "denied" as const; }
+    if (row.status === "created" || row.status === "cancelled") { await ctx.reply(`That draft was already ${row.status}. Start a new one with /new.`); return "denied" as const; }
+    return row;
+  }
+
+  const FIELD_RE = new RegExp(`^(${EDIT_FIELDS.join("|")}|close|end|start|resolution)\\s*[:=]?\\s+([\\s\\S]+)$`, "i");
+
+  bot.command("edit", async (ctx) => {
+    if (!ctx.chat || !ctx.from) return;
+    const arg = ctx.match?.toString().trim() ?? "";
+    const m = FIELD_RE.exec(arg);
+    if (!m) return ctx.reply(`Usage: /edit <field> <value>\nFields: ${EDIT_FIELDS.join(", ")}\nExamples:\n/edit ends 31 May 2027 23:00\n/edit sources https://www.uefa.com https://www.bbc.com/sport/football\nOr reply to the draft with the change in plain words.`);
+    const row = await editableDraft(ctx);
+    if (row === "denied") return;
+    if (!row) return ctx.reply("No open draft to edit. Start one with /new.");
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const d = applyEdit(row.draft, m[1], m[2], now, (s) => findDeadline(s, now)?.unix ?? null);
+      await showEdited(ctx, row.id, ctx.chat.id, row.message_id, d);
+    } catch (e) {
+      await ctx.reply((e as Error).message);
+    }
   });
 
   bot.callbackQuery(/^cancel:(d_[\w-]+)$/, async (ctx) => {
@@ -289,6 +344,28 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   });
 
   bot.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
+
+  // Reply to a draft preview with a change in plain words ("make the deadline 30 June 2027") or "field: value".
+  bot.on("message:text", async (ctx, next) => {
+    const reply = ctx.message.reply_to_message;
+    if (!reply || reply.from?.id !== ctx.me.id || ctx.message.text.startsWith("/")) return next();
+    const found = await draftByMessage(ctx.chat.id, reply.message_id);
+    if (!found) return next();
+    const row = await editableDraft(ctx);
+    if (!row || row === "denied") return;
+    const text = ctx.message.text.trim();
+    const now = Math.floor(Date.now() / 1000);
+    try {
+      const m = FIELD_RE.exec(text);
+      if (m) return await showEdited(ctx, row.id, ctx.chat.id, row.message_id, applyEdit(row.draft, m[1], m[2], now, (s) => findDeadline(s, now)?.unix ?? null));
+      await ctx.replyWithChatAction("typing").catch(() => undefined);
+      const r = await drafter(text, { previous: row.draft, instruction: text });
+      if (r.kind === "clarify") return ctx.reply(`🤔 ${r.question}`);
+      await showEdited(ctx, row.id, ctx.chat.id, row.message_id, r.draft);
+    } catch (e) {
+      await ctx.reply((e as Error).message);
+    }
+  });
   bot.catch((err) => console.error("[bot] handler error:", safeErr(err.error)));
   return bot;
 }

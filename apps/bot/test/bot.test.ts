@@ -1,6 +1,7 @@
 import { M } from "../../../packages/server/test/env";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createBot } from "../src/bot";
+import { createBot, type Drafter } from "../src/bot";
+import { draftMarket, type MarketDraft } from "@pot/core";
 import { getDraft, linkGroupMarket, recordBuy, resetDbForTests, signRef, verify } from "@pot/server";
 
 type Sent = { method: string; payload: any };
@@ -9,9 +10,10 @@ const GROUP = { id: -100500, type: "supergroup" as const, title: "Naija Ballers"
 const ADMIN: U = { id: 7, is_bot: false, first_name: "Baheet", username: "baheet_" };
 const MEMBER: U = { id: 42, is_bot: false, first_name: "Ada" };
 
-function makeBot(adminIds: number[] = [7]) {
+function makeBot(adminIds: number[] = [7], drafter?: Drafter) {
   const sent: Sent[] = [];
   const bot = createBot("123456:TEST_TOKEN_NOT_REAL_xxxxxxxxxxxxxxxxxxxx", {
+    drafter,
     botInfo: { id: 1, is_bot: true, first_name: "Pot", username: "pantapotbot", can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business: false, has_main_web_app: false } as any,
   });
   let mid = 100;
@@ -22,9 +24,12 @@ function makeBot(adminIds: number[] = [7]) {
     return { ok: true, result: true } as any;
   });
   let uid = 1;
-  const msg = (text: string, from = ADMIN, chat: any = GROUP) => bot.handleUpdate({
+  const msg = (text: string, from = ADMIN, chat: any = GROUP, replyTo?: number) => bot.handleUpdate({
     update_id: uid++,
-    message: { message_id: uid, date: Math.floor(Date.now() / 1000), chat, from, text, entities: text.startsWith("/") ? [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] : [] },
+    message: {
+      message_id: uid, date: Math.floor(Date.now() / 1000), chat, from, text, entities: text.startsWith("/") ? [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] : [],
+      ...(replyTo ? { reply_to_message: { message_id: replyTo, date: 0, chat, from: { id: 1, is_bot: true, first_name: "Pot" }, text: "draft" } } : {}),
+    },
   } as any);
   const tap = (data: string, from = ADMIN) => bot.handleUpdate({
     update_id: uid++,
@@ -121,5 +126,48 @@ describe("errors never escape (webhook mode)", () => {
     } finally { console.error = orig; }
     expect(logs.join("\n")).toContain("chat not found");
     expect(logs.join("\n")).not.toContain("TEST_TOKEN_NOT_REAL");
+  });
+});
+
+describe("AI drafting in the bot", () => {
+  const aiDraft = (q: string): MarketDraft => ({ ...draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm"), question: q, kind: "ai", drafter: "ai", warnings: [] });
+  it("/new shows the AI draft with an AI label and edit hints; a clarify answer asks back", async () => {
+    const seen: string[] = [];
+    const drafter: Drafter = async (text) => { seen.push(text); return /vague/.test(text) ? { kind: "clarify", question: "Which match?" } : { kind: "draft", draft: aiDraft("Will Paris Saint-Germain win the 2026–27 UEFA Champions League?") }; };
+    const b = makeBot([7], drafter);
+    await b.msg("/new will PSG win the champions league this season");
+    const r = b.replies()[0];
+    expect(seen[0]).toBe("/new will PSG win the champions league this season");
+    expect(r.text).toContain("written by AI");
+    expect(r.text).toContain("Paris Saint-Germain");
+    expect(r.text).toContain("/edit ends");
+    await b.msg("/new something vague");
+    expect(b.replies().at(-1).text).toContain("🤔 Which match?");
+  });
+
+  it("/edit changes a field and refreshes the preview; others can't edit", async () => {
+    const b = makeBot([7, 42], async () => ({ kind: "draft", draft: aiDraft("Will Arsenal beat Chelsea?") }));
+    await b.msg("/new Arsenal beat Chelsea tomorrow");
+    await b.msg("/edit question Will Arsenal beat Chelsea at the Emirates?");
+    const edited = b.sent.filter((s) => s.method === "editMessageText").at(-1)!.payload;
+    expect(edited.text).toContain("Updated");
+    expect(edited.text).toContain("at the Emirates?");
+    await b.msg("/edit sources http://bad.example");
+    expect(b.replies().at(-1).text).toMatch(/https/);
+    await b.msg("/edit question Hijack?", MEMBER);
+    expect(b.replies().at(-1).text).toMatch(/No open draft|Only the admin/);
+  });
+
+  it("replying to the draft revises it with the AI (or applies 'field: value')", async () => {
+    const calls: Array<{ text: string; previous?: MarketDraft }> = [];
+    const drafter: Drafter = async (text, extra) => { calls.push({ text, previous: extra?.previous }); return { kind: "draft", draft: aiDraft(extra?.previous ? "Will Arsenal beat Chelsea by two or more goals?" : "Will Arsenal beat Chelsea?") }; };
+    const b = makeBot([7], drafter);
+    await b.msg("/new Arsenal beat Chelsea tomorrow");
+    const previewId = b.sent.filter((s) => s.method === "sendMessage").length + 100;
+    await b.msg("make it win by two or more goals", ADMIN, GROUP, previewId);
+    expect(calls[1].previous?.question).toBe("Will Arsenal beat Chelsea?");
+    expect(b.sent.filter((s) => s.method === "editMessageText").at(-1)!.payload.text).toContain("two or more goals");
+    await b.msg("title: Arsenal by 2+", ADMIN, GROUP, previewId);
+    expect(calls).toHaveLength(2); // field edit didn't call the AI
   });
 });

@@ -72,6 +72,15 @@ export async function saveDraft(chatId: number, adminId: number, draft: MarketDr
 export async function getDraft(id: string): Promise<DraftRow | null> {
   return toDraft(await one<Record<string, unknown>>(`SELECT * FROM drafts WHERE id=? AND mode=?`, [id, MODE]));
 }
+/** The draft whose preview message is `messageId` in this chat (for reply-to-draft edits). */
+export async function draftByMessage(chatId: number, messageId: number): Promise<DraftRow | null> {
+  return toDraft(await one<Record<string, unknown>>(`SELECT * FROM drafts WHERE chat_id=? AND message_id=? AND mode=?`, [chatId, messageId, MODE]));
+}
+/** The admin's most recent draft in this chat that hasn't been created or cancelled (for /edit). */
+export async function latestOpenDraft(chatId: number, adminId: number): Promise<DraftRow | null> {
+  return toDraft(await one<Record<string, unknown>>(
+    `SELECT * FROM drafts WHERE chat_id=? AND admin_id=? AND mode=? AND status IN ('draft','building','confirmed') ORDER BY created_at DESC, id DESC LIMIT 1`, [chatId, adminId, MODE]));
+}
 const DRAFT_COLS = new Set(["status", "market_id", "creator_wallet", "create_signature", "message_id"]);
 export async function updateDraft(id: string, patch: Partial<{ status: string; market_id: string; creator_wallet: string; create_signature: string; message_id: number; draft: MarketDraft }>) {
   const sets: string[] = [];

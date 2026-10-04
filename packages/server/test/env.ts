@@ -16,6 +16,8 @@ process.env.PANTA_TEST_KEY_FILE = testKey;
 process.env.PANTA_KEY_FILE = liveKey;
 process.env.POT_HMAC_SECRET_FILE = path.join(dir, "hmac_secret");
 process.env.POT_TELEGRAM_TOKEN_FILE = path.join(dir, "no_token");
+process.env.POT_GEMINI_KEY_FILE = path.join(dir, "no_gemini_key"); // tests never use the real AI key
+delete process.env.POT_GEMINI_KEY;
 process.env.POT_DB_PATH = ":memory:";
 process.env.SOLANA_RPC_URL = "http://127.0.0.1:9";
 process.env.POT_PUBLIC_URL = "https://pot.example";
