@@ -3,8 +3,10 @@ import Link from "next/link";
 import "./globals.css";
 import { PoweredByPanta } from "@/components/PoweredByPanta";
 import { SANDBOX } from "@/lib/ui";
+import { WEB_URL } from "@pot/server";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(WEB_URL),
   title: "Pot · group predictions on Panta",
   description: "Your Telegram group makes the market, everyone buys in, the group earns the creator royalty. Every card shows whether the odds mean anything.",
 };

@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { runBotTicks } from "@/lib/telegram";
 import { actionHeaders, completedAction, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
-import { DEFAULT_MARKET_IMAGE, finishBuy, finishBuyPractice, getMarketView, SANDBOX } from "@pot/server";
+import { actionIcon, DEFAULT_MARKET_IMAGE, finishBuy, finishBuyPractice, getMarketView, SANDBOX } from "@pot/server";
 import { errorResponse, str } from "@/lib/http";
 
 const H = () => actionHeaders(SANDBOX ? SOLANA_DEVNET : SOLANA_MAINNET);
@@ -24,7 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       : await finishBuy({ ...common, signature: str(b.signature) });
     if (r.recorded) after(() => runBotTicks({ settle: false }));
     const v = await getMarketView(id).catch(() => null);
-    const icon = v?.market.image?.startsWith("https://") ? v.market.image : DEFAULT_MARKET_IMAGE;
+    const icon = v ? actionIcon(v) : DEFAULT_MARKET_IMAGE;
     const ok = r.status === "confirmed";
     return Response.json(completedAction(icon, ok ? "✅ You're in the pot" : "Order not confirmed", ok ? `Panta confirmed your buy.${r.newToPanta ? " Welcome to Panta!" : ""}${SANDBOX ? " Practice buy: no real money moved." : ""}` : `Panta status: ${r.status}`), { headers: H() });
   } catch (e) {

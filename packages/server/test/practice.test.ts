@@ -150,3 +150,21 @@ describe("unknown ids in test mode", () => {
     await expect(getMarketView("3PVyfS2oHBsszDQRLYKNRsx5UcC6x7C2Sc7cco3e4B6B")).rejects.toThrow(/doesn't exist/);
   });
 });
+
+describe("sharing without dial.to", () => {
+  it("the Action GET for a practice market uses our own icon and real title; share links are our URL + an X intent", async () => {
+    const { actionGetFor, xShareFor, blinkFor, shareTextFor } = await import("../src");
+    const id = await createPractice();
+    const { payload, view } = await actionGetFor(id, `g${CHAT}`, signRef(`g${CHAT}`));
+    expect(payload.title).toContain("Tinubu");
+    expect(payload.icon).toBe(`https://pot.example/api/og/${id}?sq=1`);
+    expect(payload.links!.actions[0].href).toContain(`ref=g${CHAT}`);
+    const ref = { kind: "group" as const, chatId: CHAT };
+    expect(blinkFor(id, ref)).toMatch(new RegExp(`^https://pot.example/m/${id}\\?ref=g${CHAT}&rs=`));
+    const x = new URL(xShareFor(id, ref, shareTextFor(view)));
+    expect(x.host).toBe("x.com");
+    expect(x.searchParams.get("url")).toBe(blinkFor(id, ref));
+    expect(x.searchParams.get("text")).toContain("practice market");
+    expect(JSON.stringify(payload) + x.href).not.toContain("dial.to");
+  });
+});

@@ -4,7 +4,7 @@ import { esc, findDeadline, fmtWat, renderCard, validateDraft, type Card, type R
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
-  walletsFor, blinkFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
+  walletsFor, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
 /**
@@ -66,7 +66,7 @@ export function cardMessage(card: Card): { text: string; reply_markup?: InlineKe
 export function cardFor(view: MarketView, ref: Ref): Card {
   const id = view.market.id;
   return renderCard(view.market, view.verdict, view.payout,
-    { buyYes: marketUrl(id, ref, "yes"), buyNo: marketUrl(id, ref, "no"), details: marketUrl(id, ref), blink: blinkFor(id, ref) },
+    { buyYes: marketUrl(id, ref, "yes"), buyNo: marketUrl(id, ref, "no"), details: marketUrl(id, ref), blink: xShareFor(id, ref, shareTextFor(view)) },
     { now: Math.floor(Date.now() / 1000), sandbox: view.sandbox, practice: view.practice, buyable: view.buyable });
 }
 
@@ -274,10 +274,14 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     if (!id && isGroup(ctx)) id = (await groupMarkets(ctx.chat.id))[0]?.market_id;
     if (!id || !isMarketId(id)) return ctx.reply("Usage: /share <marketId> (or use it in a group with a market)");
     const ref = memberRef(ctx);
+    const view = await getMarketView(id).catch(() => null);
+    const text = view ? shareTextFor(view) : "Pick a side on Pot:";
     const lines = [
       `🔗 <b>Your share links</b> (buys through these count for you on /top)`,
       `Telegram / WhatsApp: ${esc(marketUrl(id, ref))}`,
-      `X (Blink): ${esc(blinkFor(id, ref))}`,
+      `Post on X: ${esc(xShareFor(id, ref, text))}`,
+      `<i>On X, people with Phantom or Backpack see buy buttons right in the post (a Blink); everyone else sees a preview card that opens the market.</i>`,
+      `Preview the Blink: ${esc(blinkPreviewFor(id, ref))}`,
     ];
     await ctx.reply(lines.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
   });

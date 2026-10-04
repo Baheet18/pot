@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatRef, parseRef, pantaUserId, refGroup, cleanHandle } from "../src/refs";
 import { royaltyBpsForTilt, estimateCreatorRoyalty } from "../src/royalty";
 import { renderCard, splitBar, buyable } from "../src/card";
-import { marketActionGet, parseAmount, blinkUrl, actionHeaders, SOLANA_MAINNET } from "../src/actions";
+import { marketActionGet, parseAmount, xIntentUrl, shareText, ACTION_RULES, actionHeaders, SOLANA_MAINNET } from "../src/actions";
 import { normalizeMarket } from "../src/normalize";
 import { computeVerdict, estimatePayout } from "../src/verdict";
 import type { RawDetail } from "../src/types";
@@ -56,7 +56,7 @@ describe("sandbox normalisation + card", () => {
     // Sandbox market's startTime is in the past, so it is not buyable by time.
     expect(buyable(m, now)).toBe(false);
     const open = { ...m, startTime: now + 3600, primaryPhaseEndTime: now + 3600 };
-    const card = renderCard(open, v, p, { buyYes: "https://x/y", buyNo: "https://x/n", details: "https://x/d", blink: "https://dial.to/x" }, { now, sandbox: true });
+    const card = renderCard(open, v, p, { buyYes: "https://x/y", buyNo: "https://x/n", details: "https://x/d", blink: "https://x.com/intent/post?url=x" }, { now, sandbox: true });
     expect(card.html).toMatch(/Sandbox/);
     expect(card.html).toMatch(/Powered by Panta/);
     expect(card.html).toMatch(/Thin/);
@@ -89,12 +89,18 @@ describe("actions", () => {
     expect(a.disabled).toBe(true);
     expect(a.links).toBeUndefined();
   });
-  it("validates amounts and builds dial.to links + headers", () => {
+  it("validates amounts and builds X intent links + headers (never dial.to)", () => {
     expect(parseAmount("5")).toBe(5);
     expect(parseAmount("0.1")).toBeNull();
     expect(parseAmount("9999")).toBeNull();
     expect(parseAmount("abc")).toBeNull();
-    expect(blinkUrl("https://pot.example/api/actions/m/M1")).toBe("https://dial.to/?action=solana-action%3Ahttps%3A%2F%2Fpot.example%2Fapi%2Factions%2Fm%2FM1");
+    const x = new URL(xIntentUrl("Will it rain? Pick a side:", "https://pot.example/m/M1?ref=g-1&rs=abc"));
+    expect(x.origin + x.pathname).toBe("https://x.com/intent/post");
+    expect(x.searchParams.get("url")).toBe("https://pot.example/m/M1?ref=g-1&rs=abc");
+    expect(x.searchParams.get("text")).toBe("Will it rain? Pick a side:");
+    expect(shareText({ title: "Will it rain?", yesPct: 0.71, verdict: "Ordinary", practice: true })).toBe("Will it rain? Right now 71% of the money says YES (Ordinary). Pick a side on Pot (practice market, no real money):");
+    expect(shareText({ title: "x".repeat(300), yesPct: null, verdict: "Thin", practice: false }).length).toBeLessThan(200);
+    expect(ACTION_RULES).toContainEqual({ pathPattern: "/m/*", apiPath: "/api/actions/m/*" });
     expect(actionHeaders(SOLANA_MAINNET)["X-Blockchain-Ids"]).toBe(SOLANA_MAINNET);
   });
 });

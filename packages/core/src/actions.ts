@@ -92,7 +92,28 @@ export function completedAction(icon: string, title: string, description: string
   return { type: "completed", icon, title, description, label: "Done" };
 }
 
-/** dial.to renders any Action URL as a Blink page (also what X unfurls via registered hosts). */
-export function blinkUrl(actionUrl: string, cluster: "mainnet" | "devnet" = "mainnet") {
-  return `https://dial.to/?action=${encodeURIComponent("solana-action:" + actionUrl)}${cluster === "devnet" ? "&cluster=devnet" : ""}`;
+/**
+ * X "post" intent with prefilled text and our own market URL. We never route through a third-party Blink
+ * interstitial: the market page itself is the Blink (our actions.json maps /m/* to the Action API), so
+ * Blink-aware wallets/extensions unfurl it on X, and everyone else sees our Open Graph card.
+ */
+export function xIntentUrl(text: string, url: string) {
+  return `https://x.com/intent/post?${new URLSearchParams({ text, url }).toString()}`;
 }
+
+/** Short prefilled post text for sharing a market on X (kept well under X's limit; the URL is added by X). */
+export function shareText(opts: { title: string; yesPct: number | null; verdict: string; practice: boolean }) {
+  const title = opts.title.length > 150 ? opts.title.slice(0, 147).replace(/\s+\S*$/, "") + "…" : opts.title;
+  const split = opts.yesPct === null ? "" : ` Right now ${Math.round(opts.yesPct * 100)}% of the money says YES (${opts.verdict}).`;
+  return `${title}${split} Pick a side on Pot${opts.practice ? " (practice market, no real money)" : ""}:`;
+}
+
+/**
+ * actions.json rules. A wallet/extension that sees https://<host>/m/<id>?ref=… on X maps it to
+ * /api/actions/m/<id>?ref=… (query string carried over per the Actions spec). /blink/<id> (our preview) maps too.
+ */
+export const ACTION_RULES = [
+  { pathPattern: "/m/*", apiPath: "/api/actions/m/*" },
+  { pathPattern: "/blink/*", apiPath: "/api/actions/m/*" },
+  { pathPattern: "/api/actions/**", apiPath: "/api/actions/**" },
+];

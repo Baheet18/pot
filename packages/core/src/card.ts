@@ -76,7 +76,7 @@ export function renderCard(
   const keyboard: CardButton[][] = [];
   if (isBuyable) keyboard.push([{ text: "🟩 Buy YES", url: links.buyYes }, { text: "🟥 Buy NO", url: links.buyNo }]);
   const row: CardButton[] = [{ text: "📊 Details", url: links.details }];
-  if (links.blink && isBuyable) row.push({ text: "𝕏 Share as Blink", url: links.blink });
+  if (links.blink && isBuyable) row.push({ text: "𝕏 Share on X", url: links.blink });
   keyboard.push(row);
   return { html: lines.join("\n"), keyboard };
 }

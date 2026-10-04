@@ -92,7 +92,9 @@ describe("Pot bot", () => {
     await b.msg("/share", MEMBER);
     const t = b.replies()[0].text as string;
     expect(t).toContain(`ref=g${GROUP.id}u42`);
-    expect(t).toContain("dial.to");
+    expect(t).toContain("https://x.com/intent/post?");
+    expect(t).not.toContain("dial.to");
+    expect(t).toContain(`/blink/`);
   });
 
   it("/top shows group totals and who brought traders", async () => {

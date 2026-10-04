@@ -14,14 +14,14 @@ interface Start { orderId: string; quoteId: string; side: Side; amountUsdc: numb
 interface Finish { status: string; attributed: boolean; newToPanta: boolean; newToPot: boolean; recorded: boolean }
 type Step = "idle" | "quoting" | "quoted" | "signing" | "finishing" | "done" | "error";
 
-export interface BuyPanelProps { marketId: string; initialSide?: Side; refStr: string; rs: string | null; buyable: boolean; sandbox: boolean; liveWrites: boolean; rpc: string }
+export interface BuyPanelProps { marketId: string; initialSide?: Side; initialAmount?: number; refStr: string; rs: string | null; buyable: boolean; sandbox: boolean; liveWrites: boolean; rpc: string }
 
 function Inner(p: BuyPanelProps) {
   const { connection } = useConnection();
   const { publicKey, signTransaction, signMessage } = useWallet();
   const router = useRouter();
   const [side, setSide] = useState<Side>(p.initialSide ?? "yes");
-  const [amount, setAmount] = useState("5");
+  const [amount, setAmount] = useState(String(p.initialAmount ?? 5));
   const [step, setStep] = useState<Step>("idle");
   const [q, setQ] = useState<Start | null>(null);
   const [at, setAt] = useState(0);

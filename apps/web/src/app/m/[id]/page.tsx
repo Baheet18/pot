@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { blinkUrl, fmtPrice, fmtTime, fmtUsd } from "@pot/core";
-import { getMarketView, groupTitle, resolveRef, WEB_URL, CLUSTER, signRef } from "@pot/server";
+import { fmtPrice, fmtTime, fmtUsd, parseAmount } from "@pot/core";
+import { blinkPreviewFor, getMarketView, groupTitle, marketUrl, ogImageFor, resolveRef, shareTextFor, WEB_URL, signRef, xShareFor } from "@pot/server";
 import { VerdictBadge, VERDICT_STYLE } from "@/components/VerdictBadge";
 import { SplitBar } from "@/components/SplitBar";
 import { BuyPanel } from "@/components/BuyPanel";
@@ -9,7 +10,31 @@ import { LIVE_WRITES, RPC_URL, SANDBOX, sp } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function MarketPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+type Props = { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+/** Open Graph + X card: title, verdict, split and pot, with an image rendered by /api/og/<id>. */
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { id } = await params;
+  const v = await getMarketView(id).catch(() => null);
+  if (!v) return { title: "Market not found · Pot" };
+  const ys = v.verdict.numbers.yesSplit;
+  const description = [
+    v.practice || v.sandbox ? "Practice market (no real money)." : null,
+    `${v.verdict.kind}: ${v.verdict.line}`,
+    ys === null ? null : `${Math.round(ys * 100)}% YES / ${100 - Math.round(ys * 100)}% NO.`,
+    `Pot ${fmtUsd(v.market.totalVolumeUsdc)}.`,
+    "Pick a side on Pot, powered by Panta.",
+  ].filter(Boolean).join(" ");
+  const image = { url: ogImageFor(id), width: 1200, height: 630, alt: v.market.title };
+  return {
+    title: `${v.market.title} · Pot`,
+    description,
+    openGraph: { type: "website", siteName: "Pot", title: v.market.title, description, url: `${WEB_URL}/m/${id}`, images: [image] },
+    twitter: { card: "summary_large_image", title: v.market.title, description, images: [image.url] },
+  };
+}
+
+export default async function MarketPage({ params, searchParams }: Props) {
   const { id } = await params;
   const q = await searchParams;
   const v = await getMarketView(id).catch(() => null);
@@ -17,9 +42,10 @@ export default async function MarketPage({ params, searchParams }: { params: Pro
   const m = v.market;
   const r = resolveRef(sp(q.ref), sp(q.rs));
   const side = sp(q.side) === "no" ? "no" : sp(q.side) === "yes" ? "yes" : undefined;
-  const rq = new URLSearchParams({ ref: r.ref });
-  if (r.ref.startsWith("g")) rq.set("rs", signRef(r.ref));
-  const blink = blinkUrl(`${WEB_URL}/api/actions/m/${m.id}?${rq}`, CLUSTER);
+  const shareRef = r.parsed;
+  const shareLink = marketUrl(m.id, shareRef);
+  const xShare = xShareFor(m.id, shareRef, shareTextFor(v));
+  const preview = blinkPreviewFor(m.id, shareRef);
   const n = v.verdict.numbers;
   const group = v.practice && v.chatId !== null ? await groupTitle(v.chatId).catch(() => null) : null;
   const closes = v.sandbox && !v.practice ? "open (sandbox)" : fmtTime(m.primaryPhaseEndTime ?? m.startTime);
@@ -61,13 +87,15 @@ export default async function MarketPage({ params, searchParams }: { params: Pro
       <aside className="space-y-4">
         <div className="card p-5">
           <h2 className="mb-3 font-bold">Buy a side</h2>
-          <BuyPanel marketId={m.id} initialSide={side} refStr={r.ref} rs={r.ref.startsWith("g") ? signRef(r.ref) : null} buyable={v.buyable} sandbox={SANDBOX} liveWrites={LIVE_WRITES} rpc={RPC_URL} />
+          <BuyPanel marketId={m.id} initialSide={side} initialAmount={parseAmount(sp(q.amount)) ?? undefined} refStr={r.ref} rs={r.ref.startsWith("g") ? signRef(r.ref) : null} buyable={v.buyable} sandbox={SANDBOX} liveWrites={LIVE_WRITES} rpc={RPC_URL} />
           {r.parsed.kind !== "web" && <p className="mt-3 text-xs text-stone-400">Your buy counts for {r.parsed.kind === "x" ? `@${(r.parsed as { handle: string }).handle}` : "the group that shared this"}.</p>}
         </div>
         <div className="card space-y-2 p-5 text-sm">
           <h2 className="font-bold">Share</h2>
-          <a href={blink} target="_blank" rel="noopener noreferrer" className="block rounded-lg bg-white/10 px-3 py-2 text-center">Open as Blink (buy from X)</a>
-          <p className="break-all text-xs text-stone-500">{blink}</p>
+          <a href={xShare} target="_blank" rel="noopener noreferrer" data-testid="share-x" className="block rounded-lg bg-white px-3 py-2 text-center font-bold text-black">𝕏 Post on X</a>
+          <a href={preview} className="block rounded-lg bg-white/10 px-3 py-2 text-center">Preview the Blink</a>
+          <p className="text-xs text-stone-400">On X, people with Phantom or Backpack see buy buttons right in the post. Everyone else sees a preview card that opens this page. Link to share anywhere:</p>
+          <p className="break-all rounded bg-black/30 p-2 font-mono text-[11px] text-stone-300">{shareLink}</p>
           {!WEB_URL.startsWith("https://") && <p className="text-xs text-amber-200">Blinks need a public https address; this preview runs on localhost.</p>}
         </div>
         <PoweredByPanta />

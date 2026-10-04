@@ -1,5 +1,5 @@
-import { actionHeaders, marketActionGet, parseAmount, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
-import { DEFAULT_MARKET_IMAGE, FlowError, getMarketView, resolveRef, SANDBOX, signRef, startBuy } from "@pot/server";
+import { actionHeaders, parseAmount, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
+import { actionGetFor, FlowError, SANDBOX, startBuy } from "@pot/server";
 import { errorResponse, str } from "@/lib/http";
 
 const H = () => actionHeaders(SANDBOX ? SOLANA_DEVNET : SOLANA_MAINNET);
@@ -9,14 +9,7 @@ export async function GET(req: Request, { params }: Ctx) {
   try {
     const { id } = await params;
     const u = new URL(req.url);
-    const v = await getMarketView(id);
-    const { ref } = resolveRef(u.searchParams.get("ref"), u.searchParams.get("rs"));
-    const icon = v.market.image?.startsWith("https://") ? v.market.image : DEFAULT_MARKET_IMAGE;
-    const payload = marketActionGet({
-      marketId: id, title: v.market.title, icon, verdictLine: `${v.verdict.kind}: ${v.verdict.line}`,
-      yesPct: v.verdict.numbers.yesSplit, paysYes: v.payout.perYesShare, paysNo: v.payout.perNoShare,
-      buyable: v.buyable, ref, rs: ref.startsWith("g") ? signRef(ref) : null, sandbox: SANDBOX,
-    });
+    const { payload } = await actionGetFor(id, u.searchParams.get("ref"), u.searchParams.get("rs"));
     return Response.json(payload, { headers: H() });
   } catch (e) { return errorResponse(e, H()); }
 }
