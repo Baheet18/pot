@@ -5,9 +5,11 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { WalletProviders } from "./WalletProviders";
 import { OpenInPhantom } from "./OpenInPhantom";
 import { api, signSendConfirm } from "./sign";
+import { PracticeBanner } from "./PracticeBanner";
+import bs58 from "bs58";
 
 type Side = "yes" | "no";
-interface Start { orderId: string; quoteId: string; side: Side; amountUsdc: number; shares: number; feeUsdc: number; paysAboutIfRight: number | null; transaction: string; sandbox: boolean; sandboxMemo: boolean }
+interface Start { orderId: string; quoteId: string; side: Side; amountUsdc: number; shares: number; feeUsdc: number; paysAboutIfRight: number | null; transaction: string; practiceMessage: string | null; sandbox: boolean }
 interface Finish { status: string; attributed: boolean; newToPanta: boolean; newToPot: boolean; recorded: boolean }
 type Step = "idle" | "quoting" | "quoted" | "signing" | "finishing" | "done" | "error";
 
@@ -15,7 +17,7 @@ export interface BuyPanelProps { marketId: string; initialSide?: Side; refStr: s
 
 function Inner(p: BuyPanelProps) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction, signMessage } = useWallet();
   const [side, setSide] = useState<Side>(p.initialSide ?? "yes");
   const [amount, setAmount] = useState("5");
   const [step, setStep] = useState<Step>("idle");
@@ -37,30 +39,34 @@ function Inner(p: BuyPanelProps) {
     } catch (e) { setStep("error"); setMsg((e as Error).message); }
   }
 
-  async function finish(signature: string) {
+  async function finish(proof: { signature: string } | { practiceMessage: string; practiceSignature: string }) {
     if (!q || !publicKey) return;
-    setStep("finishing"); setSig(signature);
-    const f = await api<Finish>("/api/pot/buy/finish", { orderId: q.orderId, quoteId: q.quoteId, signature, wallet: publicKey.toBase58(), marketId: p.marketId, side: q.side, amountUsdc: q.amountUsdc, ref: p.refStr, rs: p.rs, channel: "web" });
+    setStep("finishing"); setSig("signature" in proof ? proof.signature : "practice (free message signature)");
+    const f = await api<Finish>("/api/pot/buy/finish", { orderId: q.orderId, quoteId: q.quoteId, ...proof, wallet: publicKey.toBase58(), marketId: p.marketId, side: q.side, amountUsdc: q.amountUsdc, ref: p.refStr, rs: p.rs, channel: "web" });
     setRes(f); setStep(f.status === "confirmed" ? "done" : "error");
     if (f.status !== "confirmed") setMsg(`Panta reports the order as ${f.status}.`);
   }
 
   async function signAndBuy() {
-    if (!q || !signTransaction) return;
+    if (!q) return;
     if (Date.now() - at > 45_000) { setMsg("Quote expired, getting a fresh one…"); return quote(); }
     try {
       setStep("signing");
-      const signature = await signSendConfirm(connection, q.transaction, signTransaction);
-      await finish(signature);
+      if (q.sandbox) {
+        // Practice mode: never a transaction. The wallet signs a free message; the server runs the sandbox submit.
+        if (!q.practiceMessage || !signMessage) throw new Error("This wallet can't sign messages. Try Phantom.");
+        const sigBytes = await signMessage(new TextEncoder().encode(q.practiceMessage));
+        await finish({ practiceMessage: q.practiceMessage, practiceSignature: bs58.encode(sigBytes) });
+      } else {
+        if (!signTransaction || !q.transaction) throw new Error("Wallet can't sign this transaction.");
+        await finish({ signature: await signSendConfirm(connection, q.transaction, signTransaction) });
+      }
     } catch (e) { setStep("error"); setMsg((e as Error).message); }
-  }
-
-  async function simulate() {
-    try { await finish(`sandbox_${Math.random().toString(36).slice(2, 14)}`); } catch (e) { setStep("error"); setMsg((e as Error).message); }
   }
 
   return (
     <div className="space-y-3">
+      {p.sandbox && <PracticeBanner />}
       <OpenInPhantom />
       <div className="flex gap-2">
         {(["yes", "no"] as Side[]).map((s) => (
@@ -85,15 +91,15 @@ function Inner(p: BuyPanelProps) {
             <div className="space-y-2 rounded-lg border border-white/10 p-3 text-sm">
               <div>You pay <b>${q.amountUsdc.toFixed(2)}</b> (fee ${q.feeUsdc.toFixed(2)}) and get about <b>{q.shares.toFixed(2)}</b> {q.side.toUpperCase()} shares.</div>
               {q.paysAboutIfRight !== null && <div>If {q.side.toUpperCase()} is right, this pays about <b>${q.paysAboutIfRight.toFixed(2)}</b> <span className="text-stone-400">(estimate from the pool; changes as others buy)</span>.</div>}
-              {q.sandbox && <div className="text-amber-200">🧪 Sandbox: signing sends a free devnet memo transaction{q.sandboxMemo ? "" : ""}; no USDC moves.</div>}
-              <button onClick={signAndBuy} className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black">Sign &amp; buy in wallet</button>
-              {q.sandbox && <button onClick={simulate} className="w-full rounded-lg bg-white/10 px-4 py-2 text-sm">Simulate without signing (sandbox)</button>}
+              {q.sandbox
+                ? <button onClick={signAndBuy} data-testid="confirm-practice" className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black">✍️ Confirm practice buy (free signature)</button>
+                : <button onClick={signAndBuy} className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black">Sign &amp; buy in wallet</button>}
             </div>
           )}
-          {(step === "signing" || step === "finishing") && <div className="text-sm text-stone-300">{step === "signing" ? "Waiting for your wallet and the network…" : "Confirming with Panta…"}</div>}
+          {(step === "signing" || step === "finishing") && <div className="text-sm text-stone-300">{step === "signing" ? (p.sandbox ? "Approve the free message in your wallet…" : "Waiting for your wallet and the network…") : "Confirming with Panta…"}</div>}
           {step === "done" && res && (
             <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">
-              ✅ Bought! Panta status: {res.status}. {res.attributed ? "Credited to your group/sharer." : ""} {res.newToPanta ? "🎉 Your first Panta trade." : ""}
+              ✅ {p.sandbox ? "Practice buy recorded. No real money moved." : "Bought!"} Panta status: {res.status}. {res.attributed ? "Credited to your group/sharer." : ""} {res.newToPanta ? "🎉 Your first Panta trade." : ""}
               <div className="mt-1 break-all text-xs text-stone-400">Signature: {sig}</div>
             </div>
           )}

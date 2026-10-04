@@ -6,6 +6,7 @@ import { compileTx, isSandboxSignature, isSignature, isWallet, isMarketId, type 
 import { getDraft, linkGroupMarket, recordBuy, updateDraft } from "./store";
 import { refIsTrusted } from "./tokens";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
+import { newPracticeMessage, verifyPractice } from "./practice";
 
 /**
  * Server-side flows shared by web pages, Blink actions and the bot.
@@ -26,7 +27,9 @@ export function resolveRef(ref: string | null | undefined, rs: string | null | u
 export interface StartBuyResult {
   orderId: string; quoteId: string; side: "yes" | "no"; amountUsdc: number; shares: number; feeUsdc: number;
   instructions: PantaIx[]; recentBlockhash: string; lastValidBlockHeight: number; sandbox: boolean;
-  paysAboutIfRight: number | null; userId: string; transaction: string; sandboxMemo: boolean;
+  paysAboutIfRight: number | null; userId: string;
+  /** Live: base64 v0 tx to sign. Practice mode: always "" (wallet signs `practiceMessage` instead). */
+  transaction: string; practiceMessage: string | null; sandboxMemo: boolean;
 }
 
 export async function startBuy(input: { marketId: string; side: string; amountUsdc: number; wallet: string; ref?: string | null; rs?: string | null }): Promise<StartBuyResult> {
@@ -45,9 +48,10 @@ export async function startBuy(input: { marketId: string; side: string; amountUs
     "/primaryorderbuild/", { quoteId: q.quoteId, wallet, maxSlippageBps: 100 }, { userId });
   const shares = Number(b.expectedShares ?? q.shares) || 0;
   const pays = estimateBuyPayout(view.market, side, amount, shares);
-  const c = await compileTx({ payer: wallet, instructions: b.instructions ?? [], recentBlockhash: b.recentBlockhash, memo: `pot sandbox buy ${side} ${amount} ${b.orderId}` });
+  const transaction = SANDBOX ? "" : (await compileTx({ payer: wallet, instructions: b.instructions ?? [], recentBlockhash: b.recentBlockhash })).tx;
+  const practiceMessage = SANDBOX ? newPracticeMessage("buy", wallet, marketId, `${side.toUpperCase()} $${amount.toFixed(2)}`, b.orderId) : null;
   return {
-    transaction: c.tx, sandboxMemo: c.sandboxMemo,
+    transaction, practiceMessage, sandboxMemo: false,
     orderId: b.orderId, quoteId: q.quoteId, side, amountUsdc: amount, shares, feeUsdc: Number(q.feeUsdc) || 0,
     instructions: b.instructions ?? [], recentBlockhash: b.recentBlockhash, lastValidBlockHeight: b.lastValidBlockHeight ?? 0,
     sandbox: SANDBOX, paysAboutIfRight: pays?.total ?? null, userId,
@@ -113,10 +117,10 @@ export async function startCreate(draftId: string, wallet: string) {
     "/markets/create/quote/", toCreateQuoteBody(row.draft, wallet, DEFAULT_MARKET_IMAGE), { userId: `pot:g${row.chat_id}` });
   const b = await pantaPost<{ transaction: string; recentBlockhash: string; lastValidBlockHeight: number }>("/markets/create/build/", { createId: q.createId, wallet });
   await updateDraft(draftId, { creator_wallet: wallet, status: "building" });
-  // Sandbox returns an empty transaction; swap in a free devnet memo so the sign → send path still runs.
-  let transaction = b.transaction;
-  if (SANDBOX && !transaction) transaction = (await compileTx({ payer: wallet, instructions: [], recentBlockhash: b.recentBlockhash ?? "", memo: `pot sandbox create ${q.createId}` })).tx;
-  return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc: Number(q.paymentUsdc) / 1e6, transaction, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: SANDBOX };
+  // Practice mode: never hand Panta's fixture transaction to a wallet; the admin signs a free message instead.
+  const transaction = SANDBOX ? "" : b.transaction;
+  const practiceMessage = SANDBOX ? newPracticeMessage("create", wallet, row.draft.title.slice(0, 120), `fee $${(Number(q.paymentUsdc) / 1e6).toFixed(2)} (practice)`, q.createId) : null;
+  return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc: Number(q.paymentUsdc) / 1e6, transaction, practiceMessage, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: SANDBOX };
 }
 
 export async function finishCreate(draftId: string, createId: string, signature: string) {
@@ -135,8 +139,9 @@ export async function buildClaim(kind: "win" | "creator", wallet: string, market
   if (!isWallet(wallet)) throw bad("BAD_WALLET", "Bad wallet");
   const p = kind === "win" ? "/claim/build/" : "/claim/creator-fees/build/";
   const r = await pantaPost<{ instructions: PantaIx[]; recentBlockhash: string; winningShares?: string; claimableFeesUsdc?: string }>(p, { wallet, marketId });
-  const c = await compileTx({ payer: wallet, instructions: r.instructions ?? [], recentBlockhash: r.recentBlockhash, memo: `pot sandbox ${kind} claim` });
-  return { transaction: c.tx, sandboxMemo: c.sandboxMemo, winningShares: r.winningShares ?? null, claimableFeesUsdc: r.claimableFeesUsdc ? Number(r.claimableFeesUsdc) / 1e6 : null, sandbox: SANDBOX };
+  const transaction = SANDBOX ? "" : (await compileTx({ payer: wallet, instructions: r.instructions ?? [], recentBlockhash: r.recentBlockhash })).tx;
+  const practiceMessage = SANDBOX ? newPracticeMessage("claim", wallet, marketId, kind === "win" ? "winnings" : "creator royalty", `claim:${kind}`) : null;
+  return { transaction, practiceMessage, sandboxMemo: false, winningShares: r.winningShares ?? null, claimableFeesUsdc: r.claimableFeesUsdc ? Number(r.claimableFeesUsdc) / 1e6 : null, sandbox: SANDBOX };
 }
 export async function reportClaim(wallet: string, marketId: string, signature: string) {
   if (!isSignature(signature) && !(SANDBOX && isSandboxSignature(signature))) throw bad("BAD_SIGNATURE", "Bad signature");
@@ -144,3 +149,20 @@ export async function reportClaim(wallet: string, marketId: string, signature: s
 }
 
 export type { MarketDraft };
+
+// ---------------------------------------------------------------- practice-mode finishers (wallet signed a free message)
+export async function finishBuyPractice(input: Omit<Parameters<typeof finishBuy>[0], "signature"> & { practiceMessage: string; practiceSignature: string }) {
+  const signature = verifyPractice({ message: input.practiceMessage, signature: input.practiceSignature, wallet: input.wallet, action: "buy", marketId: input.marketId, ref: input.orderId });
+  return finishBuy({ ...input, signature });
+}
+export async function finishCreatePractice(draftId: string, createId: string, wallet: string, practiceMessage: string, practiceSignature: string) {
+  const row = await getDraft(draftId);
+  if (!row) throw new FlowError(404, "NO_DRAFT", "Draft not found");
+  if (row.creator_wallet !== wallet) throw new FlowError(400, "BAD_WALLET", "Use the same wallet that started the creation.");
+  const signature = verifyPractice({ message: practiceMessage, signature: practiceSignature, wallet, action: "create", marketId: row.draft.title.slice(0, 120), ref: createId });
+  return finishCreate(draftId, createId, signature);
+}
+export function confirmClaimPractice(kind: "win" | "creator", wallet: string, marketId: string, practiceMessage: string, practiceSignature: string) {
+  const signature = verifyPractice({ message: practiceMessage, signature: practiceSignature, wallet, action: "claim", marketId, ref: `claim:${kind}` });
+  return { claimed: true, practice: true, signature };
+}

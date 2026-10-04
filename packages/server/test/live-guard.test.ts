@@ -12,3 +12,10 @@ describe("live mode without approval", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+import { verifyPractice as vp } from "../src";
+describe("practice signatures in live mode", () => {
+  it("are refused, so a free message can never stand in for a real payment", () => {
+    expect(() => vp({ message: "x", signature: "x", wallet: "x", action: "buy", marketId: "x", ref: "x" })).toThrow(/only accepted in test mode/);
+  });
+});

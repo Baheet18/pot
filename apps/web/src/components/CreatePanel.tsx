@@ -5,12 +5,14 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { WalletProviders } from "./WalletProviders";
 import { OpenInPhantom } from "./OpenInPhantom";
 import { api, signSendConfirm } from "./sign";
+import { PracticeBanner } from "./PracticeBanner";
+import bs58 from "bs58";
 
-interface Start { createId: string; expectedMarketId: string; feeUsdc: number; transaction: string; sandbox: boolean }
+interface Start { createId: string; expectedMarketId: string; feeUsdc: number; transaction: string; practiceMessage: string | null; sandbox: boolean }
 
 function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; token: string; sandbox: boolean; liveWrites: boolean; fee: number }) {
   const { connection } = useConnection();
-  const { publicKey, signTransaction } = useWallet();
+  const { publicKey, signTransaction, signMessage } = useWallet();
   const [s, setS] = useState<Start | null>(null);
   const [state, setState] = useState<"idle" | "quoting" | "ready" | "signing" | "registering" | "done" | "error">("idle");
   const [msg, setMsg] = useState("");
@@ -23,10 +25,10 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
     try { setS(await api<Start>("/api/pot/create/start", { draftId, token, wallet: publicKey.toBase58() })); setState("ready"); }
     catch (e) { setState("error"); setMsg((e as Error).message); }
   }
-  async function register(signature: string) {
-    if (!s) return;
+  async function register(proof: { signature: string } | { practiceMessage: string; practiceSignature: string }) {
+    if (!s || !publicKey) return;
     setState("registering");
-    const r = await api<{ marketId: string }>("/api/pot/create/finish", { draftId, token, createId: s.createId, signature });
+    const r = await api<{ marketId: string }>("/api/pot/create/finish", { draftId, token, createId: s.createId, wallet: publicKey.toBase58(), ...proof });
     setMarketId(r.marketId); setState("done");
   }
   async function signPay() {
@@ -34,11 +36,20 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
     try {
       if (!s.transaction) throw new Error("Panta returned no transaction to sign.");
       setState("signing");
-      await register(await signSendConfirm(connection, s.transaction, signTransaction));
+      await register({ signature: await signSendConfirm(connection, s.transaction, signTransaction) });
+    } catch (e) { setState("error"); setMsg((e as Error).message); }
+  }
+  async function signPractice() {
+    if (!s?.practiceMessage || !signMessage) { setState("error"); setMsg("This wallet can't sign messages. Try Phantom."); return; }
+    try {
+      setState("signing");
+      const sig = await signMessage(new TextEncoder().encode(s.practiceMessage));
+      await register({ practiceMessage: s.practiceMessage, practiceSignature: bs58.encode(sig) });
     } catch (e) { setState("error"); setMsg((e as Error).message); }
   }
   return (
     <div className="space-y-3">
+      {sandbox && <PracticeBanner what="Creating here is a rehearsal: no fee is charged. Your wallet signs a free message instead of paying." />}
       <OpenInPhantom />
       {!publicKey ? <WalletMultiButton /> : (
         <>
@@ -46,15 +57,15 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
           {state === "idle" || state === "error" ? <button onClick={start} className="w-full rounded-lg bg-amber-400 px-4 py-3 font-bold text-black">Get creation quote (${fee})</button> : null}
           {s && state === "ready" && (
             <div className="space-y-2 rounded-lg border border-white/10 p-3 text-sm">
-              <div>Panta fee: <b>${s.feeUsdc.toFixed(2)} USDC</b>. Part of it seeds both sides of the pot.</div>
-              {s.sandbox && !s.transaction && <div className="text-amber-200">🧪 Sandbox returns no real transaction, so simulate the payment.</div>}
-              {s.transaction && <button onClick={signPay} className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black">Sign &amp; pay in wallet</button>}
-              {s.sandbox && <button onClick={() => register(`sandbox_${Math.random().toString(36).slice(2, 14)}`).catch((e) => { setState("error"); setMsg((e as Error).message); })} className="w-full rounded-lg bg-white/10 px-4 py-2 text-sm">Simulate payment (sandbox)</button>}
+              <div>Panta fee: <b>${s.feeUsdc.toFixed(2)} USDC</b>{s.sandbox ? " (practice: not charged)" : ""}. Part of it seeds both sides of the pot.</div>
+              {s.sandbox
+                ? <button onClick={signPractice} data-testid="confirm-practice-create" className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black">✍️ Confirm practice market (free signature)</button>
+                : s.transaction && <button onClick={signPay} className="w-full rounded-lg bg-emerald-400 px-4 py-3 font-bold text-black">Sign &amp; pay in wallet</button>}
             </div>
           )}
-          {state === "signing" && <div className="text-sm">Waiting for wallet + network…</div>}
+          {state === "signing" && <div className="text-sm">{sandbox ? "Approve the free message in your wallet…" : "Waiting for wallet + network…"}</div>}
           {state === "registering" && <div className="text-sm">Registering with Panta…</div>}
-          {state === "done" && <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">✅ Market created: <a className="underline" href={`/m/${marketId}`}>{marketId}</a>. The bot will post the card in your group.</div>}
+          {state === "done" && <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">✅ {sandbox ? "Practice market created (no fee charged):" : "Market created:"} <a className="underline" href={`/m/${marketId}`}>{marketId}</a>. The bot will post the card in your group.</div>}
           {msg && <div className="text-sm text-rose-300">{msg}</div>}
         </>
       )}

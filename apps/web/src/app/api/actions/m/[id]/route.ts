@@ -1,5 +1,5 @@
 import { actionHeaders, marketActionGet, parseAmount, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
-import { DEFAULT_MARKET_IMAGE, FlowError, getMarketView, resolveRef, SANDBOX, signRef, startBuy, WEB_URL } from "@pot/server";
+import { DEFAULT_MARKET_IMAGE, FlowError, getMarketView, resolveRef, SANDBOX, signRef, startBuy } from "@pot/server";
 import { errorResponse, str } from "@/lib/http";
 
 const H = () => actionHeaders(SANDBOX ? SOLANA_DEVNET : SOLANA_MAINNET);
@@ -39,10 +39,18 @@ export async function POST(req: Request, { params }: Ctx) {
     const next = new URLSearchParams({ orderId: r.orderId, quoteId: r.quoteId, side, amount: String(r.amountUsdc), ref: ref ?? "web" });
     if (rs) next.set("rs", rs);
     const pays = r.paysAboutIfRight !== null ? ` Pays about $${r.paysAboutIfRight.toFixed(2)} if ${side.toUpperCase()} is right (estimate).` : "";
+    if (SANDBOX) {
+      // Practice mode: Solana Actions "message" response. The wallet signs free text; no transaction exists at all.
+      return Response.json({
+        type: "message",
+        data: r.practiceMessage,
+        links: { next: { type: "post", href: `/api/actions/m/${id}/next?${next}` } },
+      }, { headers: H() });
+    }
     return Response.json({
       type: "transaction",
       transaction: r.transaction,
-      message: `${SANDBOX ? "🧪 Sandbox (devnet memo, no USDC). " : ""}Buying ${side.toUpperCase()} for $${r.amountUsdc.toFixed(2)} ≈ ${r.shares.toFixed(2)} shares.${pays}`,
+      message: `Buying ${side.toUpperCase()} for $${r.amountUsdc.toFixed(2)} ≈ ${r.shares.toFixed(2)} shares.${pays}`,
       links: { next: { type: "post", href: `/api/actions/m/${id}/next?${next}` } },
     }, { headers: H() });
   } catch (e) {
@@ -52,4 +60,3 @@ export async function POST(req: Request, { params }: Ctx) {
     return Response.json({ message: j.message }, { status: res.status, headers: H() });
   }
 }
-void WEB_URL;

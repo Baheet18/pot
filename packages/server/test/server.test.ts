@@ -6,8 +6,12 @@ import bs58 from "bs58";
 import { draftMarket, linkMessage } from "@pot/core";
 import {
   finishBuy, finishCreate, FlowError, globalLeaderboard, groupLeaderboard, recordBuy, resetDbForTests, saveDraft, sign, signRef,
-  startBuy, startCreate, verify, verifyAndLink, walletsFor, getDraft, groupMarkets, refIsTrusted, pantaPost, buildClaim, MEMO_PROGRAM,
+  startBuy, startCreate, verify, verifyAndLink, walletsFor, getDraft, groupMarkets, refIsTrusted, pantaPost, buildClaim,
+  compileTx, verifyPractice, newPracticeMessage, finishBuyPractice, finishCreatePractice, confirmClaimPractice,
 } from "../src";
+import { parsePracticeMessage } from "@pot/core";
+
+const signText = (kp: Keypair, msg: string) => bs58.encode(nacl.sign.detached(new TextEncoder().encode(msg), kp.secretKey));
 
 beforeEach(async () => { await resetDbForTests(":memory:"); calls.length = 0; });
 
@@ -49,18 +53,18 @@ describe("buy flow (sandbox fixtures)", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
   });
 
-  it("quotes + builds with the signed member ref and returns a signable devnet memo tx", async () => {
+  it("quotes + builds with the signed member ref and returns a practice message, never a transaction", async () => {
     const ref = "g-1009u42";
     const r = await startBuy({ marketId: M, side: "no", amountUsdc: 10, wallet: W, ref, rs: signRef(ref) });
     expect(r.orderId).toBe("ord_sandbox_test");
-    expect(r.sandboxMemo).toBe(true);
+    expect(r.transaction).toBe("");
+    const pm = parsePracticeMessage(r.practiceMessage!);
+    expect(pm).toMatchObject({ action: "buy", wallet: W, marketId: M, ref: "ord_sandbox_test" });
+    expect(r.practiceMessage).toMatch(/No real money moves/);
     const q = calls.find((c) => c.path === "/primaryorderquote/")!;
     expect(q.body).toMatchObject({ marketId: M, side: "no", amountUsdc: "10.00", userId: "pot:g-1009u42" });
     expect(q.headers["x-user-id"]).toBe("pot:g-1009u42");
     expect(calls.find((c) => c.path === "/primaryorderbuild/")!.body.maxSlippageBps).toBe(100);
-    const tx = VersionedTransaction.deserialize(Buffer.from(r.transaction, "base64"));
-    expect(tx.message.staticAccountKeys[0].toBase58()).toBe(W);
-    expect(tx.message.staticAccountKeys.some((k) => k.equals(MEMO_PROGRAM))).toBe(true);
   });
 
   it("downgrades a forged group ref to web", async () => {
@@ -80,11 +84,11 @@ describe("buy flow (sandbox fixtures)", () => {
 
 describe("create flow (sandbox fixtures)", () => {
   it("quotes with an image + group userId, then registers and links to the group", async () => {
-    const now = Math.floor(Date.UTC(2026, 9, 3, 12) / 1000);
-    const d = await saveDraft(-77, 9, draftMarket("Will Arsenal beat Chelsea on Sunday 4pm?", { now }));
+    const d = await saveDraft(-77, 9, draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm", { now: Math.floor(Date.now() / 1000) }));
     const s = await startCreate(d.id, W);
     expect(s.createId).toBe("cr_sandbox_test");
-    expect(s.transaction.length).toBeGreaterThan(50); // sandbox memo swapped in for the empty tx
+    expect(s.transaction).toBe(""); // practice mode: no transaction for the wallet
+    expect(parsePracticeMessage(s.practiceMessage!)).toMatchObject({ action: "create", wallet: W, ref: "cr_sandbox_test" });
     const q = calls.find((c) => c.path === "/markets/create/quote/")!.body;
     expect(q.imageUrl).toMatch(/^https:\/\//);
     expect(q.userId).toBe("pot:g-77");
@@ -97,9 +101,62 @@ describe("create flow (sandbox fixtures)", () => {
 });
 
 describe("claims", () => {
-  it("builds signable claim txs", async () => {
+  it("returns a practice message instead of a claim tx", async () => {
     const r = await buildClaim("win", W, M);
-    expect(VersionedTransaction.deserialize(Buffer.from(r.transaction, "base64")).message.staticAccountKeys[0].toBase58()).toBe(W);
+    expect(r.transaction).toBe("");
+    expect(parsePracticeMessage(r.practiceMessage!)).toMatchObject({ action: "claim", wallet: W, marketId: M, ref: "claim:win" });
+  });
+});
+
+describe("practice mode (no transactions, ever)", () => {
+  it("compileTx refuses to build any transaction in test mode", async () => {
+    await expect(compileTx({ payer: W, instructions: [], recentBlockhash: "11111111111111111111111111111111" })).rejects.toThrow(/practice/);
+  });
+
+  it("verifyPractice accepts the right wallet signature and rejects wrong wallet, ref, tampering and old messages", () => {
+    const kp = Keypair.generate(), w = kp.publicKey.toBase58();
+    const msg = newPracticeMessage("buy", w, M, "YES $5.00", "ord_1");
+    const sig = signText(kp, msg);
+    const base = { message: msg, signature: sig, wallet: w, action: "buy" as const, marketId: M, ref: "ord_1" };
+    expect(verifyPractice(base)).toMatch(/^sandbox_[A-Za-z0-9_-]{24}$/);
+    expect(verifyPractice(base)).toBe(verifyPractice(base)); // deterministic id
+    expect(() => verifyPractice({ ...base, wallet: Keypair.generate().publicKey.toBase58() })).toThrow(/match/);
+    expect(() => verifyPractice({ ...base, ref: "ord_2" })).toThrow(/match/);
+    expect(() => verifyPractice({ ...base, action: "claim" })).toThrow(/match/);
+    expect(() => verifyPractice({ ...base, message: msg.replace("YES $5.00", "YES $500.00") })).toThrow(/signature/);
+    expect(() => verifyPractice({ ...base, signature: signText(Keypair.generate(), msg) })).toThrow(/signature/);
+    expect(() => verifyPractice({ ...base, now: Math.floor(Date.now() / 1000) + 3600 })).toThrow(/expired/);
+    expect(() => verifyPractice({ ...base, message: "hello" })).toThrow(/practice message/);
+  });
+
+  it("finishBuyPractice records the sandbox buy after a valid free signature", async () => {
+    const kp = Keypair.generate(), w = kp.publicKey.toBase58();
+    const ref = "g-1009u42";
+    const msg = newPracticeMessage("buy", w, M, "YES $5.00", "ord_sandbox_test");
+    const f = await finishBuyPractice({ orderId: "ord_sandbox_test", quoteId: "qt_sandbox_test", wallet: w, marketId: M, side: "yes", amountUsdc: 5, ref, rs: signRef(ref), channel: "web", practiceMessage: msg, practiceSignature: signText(kp, msg) });
+    expect(f).toMatchObject({ status: "confirmed", recorded: true, sandbox: true });
+    const submit = calls.find((c) => c.path === "/primaryordersubmit/")!;
+    expect(submit.body.signature).toMatch(/^sandbox_/);
+    expect((await groupLeaderboard(-1009)).totals.buys).toBe(1);
+    await expect(finishBuyPractice({ orderId: "ord_other", wallet: w, marketId: M, side: "yes", amountUsdc: 5, channel: "web", practiceMessage: msg, practiceSignature: signText(kp, msg) })).rejects.toThrow(/match/);
+  });
+
+  it("finishCreatePractice registers only for the wallet that started it", async () => {
+    const kp = Keypair.generate(), w = kp.publicKey.toBase58();
+    const d = await saveDraft(-78, 9, draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm", { now: Math.floor(Date.now() / 1000) }));
+    const s = await startCreate(d.id, w);
+    const sig = signText(kp, s.practiceMessage!);
+    await expect(finishCreatePractice(d.id, s.createId, W, s.practiceMessage!, sig)).rejects.toThrow(/same wallet/);
+    const f = await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, sig);
+    expect(f.marketId).toBe(M);
+    expect((await getDraft(d.id))?.status).toBe("created");
+  });
+
+  it("confirmClaimPractice checks the signature", () => {
+    const kp = Keypair.generate(), w = kp.publicKey.toBase58();
+    const msg = newPracticeMessage("claim", w, M, "winnings", "claim:win");
+    expect(confirmClaimPractice("win", w, M, msg, signText(kp, msg))).toMatchObject({ claimed: true, practice: true });
+    expect(() => confirmClaimPractice("creator", w, M, msg, signText(kp, msg))).toThrow(/match/);
   });
 });
 

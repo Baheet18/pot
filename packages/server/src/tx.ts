@@ -17,26 +17,17 @@ export const connection = () => (conn ??= new Connection(RPC_URL, "confirmed"));
 
 /**
  * Compile Panta's instruction list into an unsigned v0 transaction (base64) for the payer to sign.
- * Sandbox builds return no instructions and a fake blockhash, so we substitute a devnet memo
- * instruction + a real devnet blockhash: the full sign → broadcast → submit flow can then run on devnet.
+ * Live mode only: compiles Panta's instructions exactly as built into a v0 transaction for the user's wallet.
  */
 export async function compileTx(opts: { payer: string; instructions: PantaIx[]; recentBlockhash: string; memo?: string }): Promise<{ tx: string; blockhash: string; sandboxMemo: boolean }> {
+  // Practice mode never builds transactions for a wallet (see practice.ts). Hard stop, not a convention.
+  if (SANDBOX) throw new Error("No transactions are built in practice (test) mode.");
   const payer = new PublicKey(opts.payer);
-  let ixs = opts.instructions.map(toIx);
-  let blockhash = opts.recentBlockhash;
-  let sandboxMemo = false;
-  if (SANDBOX && ixs.length === 0) {
-    ixs = [new TransactionInstruction({ programId: MEMO_PROGRAM, keys: [{ pubkey: payer, isSigner: true, isWritable: false }], data: Buffer.from(opts.memo ?? "pot sandbox test") })];
-    try {
-      blockhash = (await connection().getLatestBlockhash("confirmed")).blockhash;
-    } catch {
-      blockhash = "11111111111111111111111111111111"; // devnet unreachable: still signable, not broadcastable (use Simulate)
-    }
-    sandboxMemo = true;
-  }
+  const ixs = opts.instructions.map(toIx);
+  const blockhash = opts.recentBlockhash;
   // Live: Panta's instructions are used exactly as built (no extra instructions), so its fail-closed verification matches.
   const msg = new TransactionMessage({ payerKey: payer, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message();
-  return { tx: Buffer.from(new VersionedTransaction(msg).serialize()).toString("base64"), blockhash, sandboxMemo };
+  return { tx: Buffer.from(new VersionedTransaction(msg).serialize()).toString("base64"), blockhash, sandboxMemo: false };
 }
 
 export const isSignature = (s: string) => /^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(s);
