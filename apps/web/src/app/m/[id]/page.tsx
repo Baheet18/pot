@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { blinkUrl, fmtPrice, fmtTime, fmtUsd } from "@pot/core";
-import { getMarketView, resolveRef, WEB_URL, CLUSTER, signRef } from "@pot/server";
+import { getMarketView, groupTitle, resolveRef, WEB_URL, CLUSTER, signRef } from "@pot/server";
 import { VerdictBadge, VERDICT_STYLE } from "@/components/VerdictBadge";
 import { SplitBar } from "@/components/SplitBar";
 import { BuyPanel } from "@/components/BuyPanel";
@@ -21,12 +21,15 @@ export default async function MarketPage({ params, searchParams }: { params: Pro
   if (r.ref.startsWith("g")) rq.set("rs", signRef(r.ref));
   const blink = blinkUrl(`${WEB_URL}/api/actions/m/${m.id}?${rq}`, CLUSTER);
   const n = v.verdict.numbers;
+  const group = v.practice && v.chatId !== null ? await groupTitle(v.chatId).catch(() => null) : null;
+  const closes = v.sandbox && !v.practice ? "open (sandbox)" : fmtTime(m.primaryPhaseEndTime ?? m.startTime);
   return (
     <div className="grid gap-6 md:grid-cols-[1fr_380px]">
       <div className="space-y-5">
         <div>
-          <div className="mb-2 text-xs uppercase tracking-wide text-stone-400">{m.category} · {v.buyable ? "buying open" : m.phase}{v.sandbox ? " · sandbox fixture" : ""}</div>
-          <h1 className="text-3xl font-black leading-tight">{m.title}</h1>
+          {v.practice && <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-200">🧪 Practice market · no real money{group ? ` · made in ${group}` : ""}</div>}
+          <div className="mb-2 text-xs uppercase tracking-wide text-stone-400">{m.category} · {v.buyable ? "buying open" : v.practice ? "buying closed" : m.phase}{v.sandbox && !v.practice ? " · sandbox fixture" : ""}</div>
+          <h1 className="text-2xl font-black leading-tight break-words md:text-3xl">{m.title}</h1>
         </div>
         <div className="card space-y-3 p-5">
           <div className="flex items-center gap-3"><VerdictBadge kind={v.verdict.kind} size="lg" /><span className="text-stone-200">{v.verdict.line}</span></div>
@@ -36,7 +39,7 @@ export default async function MarketPage({ params, searchParams }: { params: Pro
             <div><div className="text-stone-400">YES price</div><b>{fmtPrice(m.yesPrice)}</b></div>
             <div><div className="text-stone-400">Pot</div><b>{fmtUsd(m.totalVolumeUsdc)}</b></div>
             <div><div className="text-stone-400">Real wallets</div><b>{n.realWallets}</b> <span className="text-stone-500">({n.realWalletsYes} YES / {n.realWalletsNo} NO)</span></div>
-            <div><div className="text-stone-400">Buying closes</div><b>{v.sandbox ? "open (sandbox)" : fmtTime(m.primaryPhaseEndTime ?? m.startTime)}</b></div>
+            <div><div className="text-stone-400">Buying closes</div><b>{closes}</b></div>
           </div>
           <div className="rounded-lg bg-white/5 p-3 text-sm">
             {v.payout.perYesShare === null && v.payout.perNoShare === null ? <>No money in the pool yet, so there&apos;s no payout estimate. The first buyers set it.</> : <>
@@ -47,8 +50,12 @@ export default async function MarketPage({ params, searchParams }: { params: Pro
         <div className="card space-y-2 p-5 text-sm">
           <h2 className="font-bold">How it&apos;s decided</h2>
           <p className="whitespace-pre-line text-stone-300">{m.resolutionRule ?? "No rule text published."}</p>
-          {m.sources.length > 0 && <p className="text-stone-400">Sources: {m.sources.map((s) => <a key={s} href={s} className="mr-2 underline" target="_blank" rel="noopener noreferrer">{s.replace(/^https?:\/\//, "")}</a>)}</p>}
-          <p className="text-stone-400">Resolves around {fmtTime(m.resolutionTime)}.</p>
+          {m.sources.length > 0 && <p className="break-words text-stone-400">Sources: {m.sources.map((s) => <a key={s} href={s} className="mr-2 underline" target="_blank" rel="noopener noreferrer">{s.replace(/^https?:\/\//, "")}</a>)}</p>}
+          <div className="grid gap-1 text-stone-400 sm:grid-cols-3">
+            <div>Buying closes<br /><b className="text-stone-200">{closes}</b></div>
+            {m.endTime ? <div>Event deadline<br /><b className="text-stone-200">{fmtTime(m.endTime)}</b></div> : null}
+            <div>Result expected by<br /><b className="text-stone-200">{fmtTime(m.resolutionTime)}</b></div>
+          </div>
         </div>
       </div>
       <aside className="space-y-4">

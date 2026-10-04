@@ -12,14 +12,15 @@ export function MarketCard({ v }: { v: MarketView }) {
         <h3 className="font-semibold leading-snug">{m.title}</h3>
         <VerdictBadge kind={v.verdict.kind} />
       </div>
+      {v.practice && <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-sky-300">🧪 Practice market · {m.category}</div>}
       <p className="mb-3 text-sm text-stone-300">{v.verdict.line}</p>
       <SplitBar yesSplit={v.verdict.numbers.yesSplit} label={v.verdict.numbers.splitBasis === "real-money" ? "real money" : undefined} />
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-400">
+      <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-stone-400 max-sm:grid-cols-1">
         <div>YES {fmtPrice(m.yesPrice)} · NO {fmtPrice(m.noPrice)}</div>
         <div>Pot {fmtUsd(m.totalVolumeUsdc)}</div>
         <div>{v.verdict.numbers.realWallets} real wallets</div>
       </div>
-      <div className="mt-2 text-xs text-stone-500">{v.buyable ? (v.sandbox ? "Buying open (sandbox fixture)" : `Buying open · closes ${fmtTime(m.primaryPhaseEndTime ?? m.startTime)}`) : "Buying closed"}</div>
+      <div className="mt-2 text-xs text-stone-500">{v.buyable ? (v.sandbox && !v.practice ? "Buying open (sandbox fixture)" : `Buying open · closes ${fmtTime(m.primaryPhaseEndTime ?? m.startTime)}`) : "Buying closed"}</div>
     </Link>
   );
 }

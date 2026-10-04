@@ -57,7 +57,7 @@ export function marketActionGet(opts: {
     `/api/actions/m/${opts.marketId}?side=${side}&amount=${amount ?? "{amount}"}&ref=${encodeURIComponent(opts.ref)}${opts.rs ? `&rs=${encodeURIComponent(opts.rs)}` : ""}`;
   const pay = (x: number | null) => (x === null ? "—" : `$${x.toFixed(2)}`);
   const desc = [
-    opts.sandbox ? "🧪 Practice mode: no real money. You sign a free message, not a transaction." : null,
+    opts.sandbox ? "🧪 Practice market: no real money. You sign a free message, not a transaction." : null,
     opts.verdictLine,
     opts.yesPct !== null ? `Money split: ${Math.round(opts.yesPct * 100)}% YES.` : null,
     opts.paysYes !== null || opts.paysNo !== null ? `Pays about ${pay(opts.paysYes)}/share if YES is right, ${pay(opts.paysNo)} if NO (estimate).` : null,

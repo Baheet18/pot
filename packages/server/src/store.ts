@@ -28,6 +28,12 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS members (tg_user_id BIGINT PRIMARY KEY, name TEXT NOT NULL, updated_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS wallet_links (tg_user_id BIGINT NOT NULL, wallet TEXT NOT NULL, mode TEXT NOT NULL, linked_at BIGINT NOT NULL, PRIMARY KEY (tg_user_id, wallet, mode))`,
   `CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL, updated_at BIGINT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS practice_trades (
+    signature TEXT NOT NULL, mode TEXT NOT NULL, market_id TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT NOT NULL, amount_usdc DOUBLE PRECISION NOT NULL,
+    shares DOUBLE PRECISION NOT NULL, created_ms BIGINT NOT NULL, PRIMARY KEY (signature, mode))`,
+  `CREATE TABLE IF NOT EXISTS practice_markets (
+    id TEXT PRIMARY KEY, mode TEXT NOT NULL, chat_id BIGINT NOT NULL, draft_id TEXT NOT NULL, creator_wallet TEXT NOT NULL,
+    draft_json TEXT NOT NULL, created_at BIGINT NOT NULL)`,
 ];
 
 async function init(file?: string): Promise<Sql> {
@@ -187,4 +193,100 @@ export async function claimSlot(key: string, everySec: number): Promise<boolean>
   const t = now();
   await run(`INSERT INTO kv (k, v, updated_at) VALUES (?, '0', 0) ON CONFLICT DO NOTHING`, [key]);
   return (await run(`UPDATE kv SET v=?, updated_at=? WHERE k=? AND updated_at <= ?`, [String(t), t, key, t - everySec])).changes > 0;
+}
+
+// ---------------------------------------------------------------- practice markets (test mode only)
+export interface PracticeMarketRow { id: string; chat_id: number; draft_id: string; creator_wallet: string; draft: MarketDraft; created_at: number }
+const toPractice = (r: Record<string, unknown> | undefined): PracticeMarketRow | null =>
+  r ? ({ ...(r as unknown as PracticeMarketRow), chat_id: Number(r.chat_id), created_at: Number(r.created_at), draft: JSON.parse(r.draft_json as string) } as PracticeMarketRow) : null;
+export async function insertPracticeMarket(row: { id: string; chatId: number; draftId: string; creatorWallet: string; draft: MarketDraft }) {
+  await run(`INSERT INTO practice_markets (id, mode, chat_id, draft_id, creator_wallet, draft_json, created_at) VALUES (?,?,?,?,?,?,?)`,
+    [row.id, MODE, row.chatId, row.draftId, row.creatorWallet, JSON.stringify(row.draft), now()]);
+}
+export async function getPracticeMarket(id: string): Promise<PracticeMarketRow | null> {
+  return toPractice(await one<Record<string, unknown>>(`SELECT * FROM practice_markets WHERE id=? AND mode=?`, [id, MODE]));
+}
+export async function listPracticeMarkets(limit = 50): Promise<PracticeMarketRow[]> {
+  return (await all<Record<string, unknown>>(`SELECT * FROM practice_markets WHERE mode=? ORDER BY created_at DESC LIMIT ?`, [MODE, limit])).map((r) => toPractice(r)!);
+}
+export interface PracticeTradeRow { signature: string; market_id: string; wallet: string; side: "yes" | "no"; amount_usdc: number; shares: number; created_ms: number }
+/** Practice-pool fills, with the shares fixed at the moment of the buy (so the pool never depends on row order). */
+export async function insertPracticeTrade(t: { signature: string; marketId: string; wallet: string; side: "yes" | "no"; amountUsdc: number; shares: number }) {
+  await run(`INSERT INTO practice_trades (signature, mode, market_id, wallet, side, amount_usdc, shares, created_ms) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
+    [t.signature, MODE, t.marketId, t.wallet, t.side, t.amountUsdc, t.shares, Date.now()]);
+}
+export async function practiceTrades(marketId: string): Promise<PracticeTradeRow[]> {
+  return (await all<PracticeTradeRow>(`SELECT * FROM practice_trades WHERE market_id=? AND mode=? ORDER BY created_ms, signature`, [marketId, MODE]))
+    .map((r) => ({ ...r, amount_usdc: Number(r.amount_usdc), shares: Number(r.shares), created_ms: Number(r.created_ms) }));
+}
+export async function buysForMarket(marketId: string): Promise<BuyRow[]> {
+  return all<BuyRow>(`SELECT * FROM buys WHERE market_id=? AND mode=? ORDER BY created_at, signature`, [marketId, MODE]);
+}
+export async function buysForWallets(wallets: string[]): Promise<BuyRow[]> {
+  if (!wallets.length) return [];
+  return all<BuyRow>(`SELECT * FROM buys WHERE mode=? AND wallet IN (${wallets.map(() => "?").join(",")}) ORDER BY created_at`, [MODE, ...wallets]);
+}
+
+/** Test-mode reset: removes every row for MODE='test' (never touches live rows). Returns rows deleted per table. */
+/** Real Telegram user ids are large; ids below this are fixtures from scripts/tests. */
+const FAKE_TG_ID_MAX = 100000;
+const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades"] as const;
+/** Counts of test-mode rows (what wipeTestData would remove). */
+export async function testDataSummary(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const t of WIPE_TABLES) out[t] = Number((await one<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t} WHERE mode=?`, ["test"]))?.n ?? 0);
+  out.wallet_links_fake = Number((await one<{ n: number }>(`SELECT COUNT(*) AS n FROM wallet_links WHERE mode=? AND tg_user_id < ?`, ["test", FAKE_TG_ID_MAX]))?.n ?? 0);
+  out.wallet_links_real_kept = Number((await one<{ n: number }>(`SELECT COUNT(*) AS n FROM wallet_links WHERE mode=? AND tg_user_id >= ?`, ["test", FAKE_TG_ID_MAX]))?.n ?? 0);
+  out.members_fake = Number((await one<{ n: number }>(`SELECT COUNT(*) AS n FROM members WHERE tg_user_id < ?`, [FAKE_TG_ID_MAX]))?.n ?? 0);
+  return out;
+}
+/**
+ * Removes all test-mode buys, drafts, group links, groups and practice markets, plus fixture members/links from scripts.
+ * Real people's wallet links (made with /link) are kept so nobody has to re-link. Groups re-register on their next message.
+ */
+export async function wipeTestData(): Promise<Record<string, number>> {
+  if (MODE !== "test") throw new Error("wipeTestData only runs in test mode");
+  const out: Record<string, number> = {};
+  for (const t of WIPE_TABLES) out[t] = (await run(`DELETE FROM ${t} WHERE mode=?`, ["test"])).changes;
+  out.wallet_links_fake = (await run(`DELETE FROM wallet_links WHERE mode=? AND tg_user_id < ?`, ["test", FAKE_TG_ID_MAX])).changes;
+  out.members_fake = (await run(`DELETE FROM members WHERE tg_user_id < ?`, [FAKE_TG_ID_MAX])).changes;
+  return out;
+}
+
+// ---------------------------------------------------------------- public leaderboards (groups by name, people by Telegram name or short wallet)
+export interface GroupRank { chat_id: number; title: string | null; wallets: number; new_to_pot: number; buys: number; volume: number }
+export async function topGroups(limit = 20): Promise<GroupRank[]> {
+  const rows = await all<GroupRank>(`SELECT b.chat_id AS chat_id, MAX(g.title) AS title, COUNT(DISTINCT b.wallet) AS wallets, COALESCE(SUM(b.new_to_pot),0) AS new_to_pot,
+      COUNT(*) AS buys, COALESCE(SUM(b.amount_usdc),0) AS volume
+    FROM buys b LEFT JOIN chat_groups g ON g.chat_id=b.chat_id AND g.mode=b.mode
+    WHERE b.mode=? AND b.chat_id IS NOT NULL GROUP BY b.chat_id ORDER BY wallets DESC, volume DESC LIMIT ?`, [MODE, limit]);
+  return rows.map((r) => ({ ...r, chat_id: Number(r.chat_id), wallets: Number(r.wallets), new_to_pot: Number(r.new_to_pot), buys: Number(r.buys), volume: Number(r.volume) }));
+}
+export interface PersonRank { key: string; name: string; telegram: boolean; wallets: number; buys: number; volume: number; brought: number }
+const shortWallet = (w: string) => `${w.slice(0, 4)}…${w.slice(-4)}`;
+export async function topPeople(limit = 20, chatId?: number): Promise<PersonRank[]> {
+  const where = chatId === undefined ? "" : " AND chat_id=?";
+  const args = chatId === undefined ? [MODE] : [MODE, chatId];
+  const byWallet = await all<{ wallet: string; buys: number; volume: number }>(`SELECT wallet, COUNT(*) AS buys, COALESCE(SUM(amount_usdc),0) AS volume FROM buys WHERE mode=?${where} GROUP BY wallet`, args);
+  const links = await all<{ wallet: string; tg_user_id: number; name: string | null }>(`SELECT l.wallet, l.tg_user_id, m.name FROM wallet_links l LEFT JOIN members m ON m.tg_user_id=l.tg_user_id WHERE l.mode=?`, [MODE]);
+  const sharers = await all<{ sharer_tg_id: number; name: string | null; brought: number }>(`SELECT b.sharer_tg_id, MAX(m.name) AS name, COUNT(DISTINCT b.wallet) AS brought FROM buys b LEFT JOIN members m ON m.tg_user_id=b.sharer_tg_id
+    WHERE b.mode=? AND b.sharer_tg_id IS NOT NULL${where.replace("chat_id", "b.chat_id")} GROUP BY b.sharer_tg_id`, args);
+  const owner = new Map(links.map((l) => [l.wallet, l]));
+  const people = new Map<string, PersonRank>();
+  const get = (key: string, name: string, telegram: boolean) => people.get(key) ?? people.set(key, { key, name, telegram, wallets: 0, buys: 0, volume: 0, brought: 0 }).get(key)!;
+  for (const w of byWallet) {
+    const l = owner.get(w.wallet);
+    const p = l ? get(`tg:${l.tg_user_id}`, l.name ?? `Telegram user`, true) : get(`w:${w.wallet}`, shortWallet(w.wallet), false);
+    p.wallets++; p.buys += Number(w.buys); p.volume += Number(w.volume);
+  }
+  for (const s of sharers) get(`tg:${s.sharer_tg_id}`, s.name ?? "Telegram user", true).brought += Number(s.brought);
+  const xs = await all<{ sharer_x: string; brought: number }>(`SELECT sharer_x, COUNT(DISTINCT wallet) AS brought FROM buys WHERE mode=? AND sharer_x IS NOT NULL${where} GROUP BY sharer_x`, args);
+  for (const x of xs) get(`x:${x.sharer_x}`, `@${x.sharer_x} on X`, false).brought += Number(x.brought);
+  return [...people.values()].sort((a, b) => b.brought - a.brought || b.volume - a.volume || b.buys - a.buys).slice(0, limit);
+}
+
+/** Telegram name of whoever linked this wallet (if anyone), for buy alerts. */
+export async function walletOwnerName(wallet: string): Promise<string | null> {
+  const r = await one<{ name: string | null }>(`SELECT m.name FROM wallet_links l JOIN members m ON m.tg_user_id=l.tg_user_id WHERE l.mode=? AND l.wallet=? LIMIT 1`, [MODE, wallet]);
+  return r?.name ?? null;
 }

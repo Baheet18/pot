@@ -43,12 +43,14 @@ export function renderCard(
   v: Verdict,
   p: PayoutEstimate,
   links: CardLinks,
-  opts: { now: number; sandbox: boolean; groupName?: string; buyable?: boolean },
+  opts: { now: number; sandbox: boolean; practice?: boolean; groupName?: string; buyable?: boolean },
 ): Card {
   const n = v.numbers;
   const lines: string[] = [];
-  if (opts.sandbox) lines.push("🧪 <i>Sandbox test market (no real money)</i>");
+  if (opts.practice) lines.push("🧪 <i>Practice market: no real money</i>");
+  else if (opts.sandbox) lines.push("🧪 <i>Sandbox test market (no real money)</i>");
   lines.push(`<b>${esc(m.title)}</b>`);
+  if (m.category) lines.push(`🏷 <i>${esc(m.category)}</i>`);
   lines.push(`${VERDICT_EMOJI[v.kind] ?? "•"} <b>${v.kind}</b>: ${esc(v.line)}`);
   const ys = n.yesSplit;
   lines.push(`YES ${ys === null ? "—" : Math.round(ys * 100) + "%"} ${splitBar(ys)} ${ys === null ? "—" : Math.round((1 - ys) * 100) + "%"} NO <i>(money split)</i>`);
@@ -64,6 +66,11 @@ export function renderCard(
       (m.isResolved ? `Resolved: <b>${m.yesWins ? "YES" : "NO"}</b>` : isBuyable ? (closes > opts.now ? `⏳ buying closes ${timeLeft(closes, opts.now)}` : "⏳ buying open (sandbox)") : "buy window closed"),
   );
   if (isBuyable && closes > opts.now) lines.push(`<i>Closes ${esc(fmtWat(closes))}</i>`);
+  if (!m.isResolved && m.resolutionTime && m.resolutionTime > opts.now && (opts.practice || !opts.sandbox)) lines.push(`<i>Result expected by ${esc(fmtWat(m.resolutionTime))}</i>`);
+  if (m.resolutionRule && (opts.practice || !opts.sandbox)) {
+    const rule = m.resolutionRule.replace(/\s+/g, " ").trim();
+    lines.push(`📜 ${esc(rule.length > 180 ? rule.slice(0, 177).replace(/\s+\S*$/, "") + "…" : rule)} <i>(full rule: Details)</i>`);
+  }
   lines.push(`<i>Powered by Panta</i>`);
 
   const keyboard: CardButton[][] = [];

@@ -65,7 +65,7 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
           )}
           {state === "signing" && <div className="text-sm">{sandbox ? "Approve the free message in your wallet…" : "Waiting for wallet + network…"}</div>}
           {state === "registering" && <div className="text-sm">Registering with Panta…</div>}
-          {state === "done" && <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">✅ {sandbox ? "Practice market created (no fee charged):" : "Market created:"} <a className="underline" href={`/m/${marketId}`}>{marketId}</a>. The bot will post the card in your group.</div>}
+          {state === "done" && <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">✅ {sandbox ? "Practice market created (no fee charged):" : "Market created:"} <a className="break-all underline" href={`/m/${marketId}`}>open the market page</a>. The bot will post the card in your group.</div>}
           {msg && <div className="text-sm text-rose-300">{msg}</div>}
         </>
       )}

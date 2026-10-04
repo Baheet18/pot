@@ -3,10 +3,11 @@ import { randomBytes } from "node:crypto";
 import { getMarketView } from "./views";
 import { getWalletTrades, invalidate, pantaPost, PantaError } from "./panta";
 import { compileTx, isSandboxSignature, isSignature, isWallet, isMarketId, type PantaIx } from "./tx";
-import { getDraft, linkGroupMarket, recordBuy, updateDraft } from "./store";
+import { getDraft, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft } from "./store";
 import { refIsTrusted } from "./tokens";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
 import { newPracticeMessage, verifyPractice } from "./practice";
+import { createPracticeMarket, practiceState, quotePractice } from "./practicemarket";
 
 /**
  * Server-side flows shared by web pages, Blink actions and the bot.
@@ -43,6 +44,18 @@ export async function startBuy(input: { marketId: string; side: string; amountUs
   const view = await getMarketView(marketId);
   if (!view.buyable) throw new FlowError(409, "NOT_BUYABLE", "This market is not in its buy-only phase, so it can't be bought through the API.");
   const { userId } = resolveRef(input.ref, input.rs);
+  if (view.practice) {
+    // Practice market: quote against Pot's simulated pool; nothing goes to Panta or any chain.
+    const st = (await practiceState(marketId))!;
+    const { shares } = quotePractice(st.pool, side, amount);
+    const pays = estimateBuyPayout(view.market, side, amount, shares);
+    const orderId = `ord_p_${randomBytes(9).toString("base64url")}`;
+    return {
+      transaction: "", sandboxMemo: false, practiceMessage: newPracticeMessage("buy", wallet, marketId, `${side.toUpperCase()} $${amount.toFixed(2)}`, orderId),
+      orderId, quoteId: orderId, side, amountUsdc: amount, shares, feeUsdc: 0, instructions: [], recentBlockhash: "", lastValidBlockHeight: 0,
+      sandbox: true, paysAboutIfRight: pays?.total ?? null, userId,
+    };
+  }
   const q = await pantaPost<{ quoteId: string; shares: string; feeUsdc: string }>("/primaryorderquote/", { wallet, marketId, side, amountUsdc: amount.toFixed(2) }, { userId });
   const b = await pantaPost<{ orderId: string; instructions: PantaIx[]; recentBlockhash: string; lastValidBlockHeight: number; expectedShares?: string }>(
     "/primaryorderbuild/", { quoteId: q.quoteId, wallet, maxSlippageBps: 100 }, { userId });
@@ -113,14 +126,21 @@ export async function startCreate(draftId: string, wallet: string) {
   if (!isWallet(wallet)) throw bad("BAD_WALLET", "Bad wallet");
   const problems = validateDraft(row.draft);
   if (problems.length) throw bad("BAD_DRAFT", problems.join("; "));
+  if (SANDBOX) {
+    // Practice market: no Panta call and no transaction. The admin signs a free message; Pot stores the market itself.
+    await updateDraft(draftId, { creator_wallet: wallet, status: "building" });
+    const createId = practiceCreateId(draftId);
+    const fee = row.draft.creationFeeUsdc;
+    return {
+      createId, expectedMarketId: "", feeUsdc: fee, transaction: "", lastValidBlockHeight: 0, sandbox: true,
+      practiceMessage: newPracticeMessage("create", wallet, row.draft.title.slice(0, 120), `fee $${fee.toFixed(2)} (practice, not charged)`, createId),
+    };
+  }
   const q = await pantaPost<{ createId: string; expectedEventPda: string; paymentUsdc: string }>(
     "/markets/create/quote/", toCreateQuoteBody(row.draft, wallet, DEFAULT_MARKET_IMAGE), { userId: `pot:g${row.chat_id}` });
   const b = await pantaPost<{ transaction: string; recentBlockhash: string; lastValidBlockHeight: number }>("/markets/create/build/", { createId: q.createId, wallet });
   await updateDraft(draftId, { creator_wallet: wallet, status: "building" });
-  // Practice mode: never hand Panta's fixture transaction to a wallet; the admin signs a free message instead.
-  const transaction = SANDBOX ? "" : b.transaction;
-  const practiceMessage = SANDBOX ? newPracticeMessage("create", wallet, row.draft.title.slice(0, 120), `fee $${(Number(q.paymentUsdc) / 1e6).toFixed(2)} (practice)`, q.createId) : null;
-  return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc: Number(q.paymentUsdc) / 1e6, transaction, practiceMessage, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: SANDBOX };
+  return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc: Number(q.paymentUsdc) / 1e6, transaction: b.transaction, practiceMessage: null, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: false };
 }
 
 export async function finishCreate(draftId: string, createId: string, signature: string) {
@@ -151,16 +171,34 @@ export async function reportClaim(wallet: string, marketId: string, signature: s
 export type { MarketDraft };
 
 // ---------------------------------------------------------------- practice-mode finishers (wallet signed a free message)
+export const practiceCreateId = (draftId: string) => `cr_p_${draftId.replace(/^d_/, "")}`;
 export async function finishBuyPractice(input: Omit<Parameters<typeof finishBuy>[0], "signature"> & { practiceMessage: string; practiceSignature: string }) {
   const signature = verifyPractice({ message: input.practiceMessage, signature: input.practiceSignature, wallet: input.wallet, action: "buy", marketId: input.marketId, ref: input.orderId });
-  return finishBuy({ ...input, signature });
+  const st = await practiceState(input.marketId);
+  if (!st) return finishBuy({ ...input, signature });
+  // Practice market: the signed message must match the order exactly; then record it in Pot's practice pool.
+  const amount = Math.round(input.amountUsdc * 100) / 100;
+  const detail = input.practiceMessage.split("\n").find((l) => l.startsWith("Detail: "))?.slice(8);
+  if (detail !== `${input.side.toUpperCase()} $${amount.toFixed(2)}`) throw bad("BAD_PRACTICE", "The practice message doesn't match this order.");
+  if (!(amount >= 1 && amount <= 500)) throw bad("BAD_AMOUNT", "Amount must be between $1 and $500");
+  if (Math.floor(Date.now() / 1000) >= st.row.draft.startTime) throw new FlowError(409, "NOT_BUYABLE", "Buying has closed on this market.");
+  const { ref, parsed, userId } = resolveRef(input.ref, input.rs);
+  const rec = await recordBuy({
+    signature, marketId: input.marketId, wallet: input.wallet, side: input.side, amountUsdc: amount, ref, pantaUserId: userId, chatId: refGroup(parsed),
+    sharerTgId: parsed.kind === "member" ? parsed.userId : null, sharerX: parsed.kind === "x" ? parsed.handle : null,
+    newToPanta: false, pantaStatus: "practice", attributed: parsed.kind !== "web", channel: input.channel,
+  });
+  if (rec.inserted) await insertPracticeTrade({ signature, marketId: input.marketId, wallet: input.wallet, side: input.side, amountUsdc: amount, shares: quotePractice(st.pool, input.side, amount).shares });
+  return { status: "confirmed", attributed: parsed.kind !== "web", newToPanta: false, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: true, practice: true };
 }
 export async function finishCreatePractice(draftId: string, createId: string, wallet: string, practiceMessage: string, practiceSignature: string) {
   const row = await getDraft(draftId);
   if (!row) throw new FlowError(404, "NO_DRAFT", "Draft not found");
   if (row.creator_wallet !== wallet) throw new FlowError(400, "BAD_WALLET", "Use the same wallet that started the creation.");
+  if (row.status === "created") throw new FlowError(409, "ALREADY_CREATED", "This market was already created");
+  if (createId !== practiceCreateId(draftId)) throw bad("BAD_CREATE", "Bad create id");
   const signature = verifyPractice({ message: practiceMessage, signature: practiceSignature, wallet, action: "create", marketId: row.draft.title.slice(0, 120), ref: createId });
-  return finishCreate(draftId, createId, signature);
+  return createPracticeMarket(draftId, wallet, signature);
 }
 export function confirmClaimPractice(kind: "win" | "creator", wallet: string, marketId: string, practiceMessage: string, practiceSignature: string) {
   const signature = verifyPractice({ message: practiceMessage, signature: practiceSignature, wallet, action: "claim", marketId, ref: `claim:${kind}` });

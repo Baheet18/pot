@@ -3,7 +3,7 @@ import type { UserFromGetMe } from "grammy/types";
 import { esc, findDeadline, fmtWat, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
-  marketUrl, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
+  marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
   walletsFor, blinkFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
@@ -32,7 +32,7 @@ export function safeErr(e: unknown): string {
 
 const shortW = (w: string) => `${w.slice(0, 4)}…${w.slice(-4)}`;
 const usd = (x: number | null | undefined) => (x === null || x === undefined || !Number.isFinite(x) ? "—" : `$${x >= 100 ? Math.round(x).toLocaleString("en-US") : x.toFixed(2)}`);
-const SANDBOX_NOTE = SANDBOX ? "\n\n🧪 <i>Sandbox mode: test data, no real money moves.</i>" : "";
+const SANDBOX_NOTE = SANDBOX ? "\n\n🧪 <i>Practice mode: no real money moves.</i>" : "";
 
 function isGroup(ctx: Context) {
   return ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
@@ -67,7 +67,7 @@ export function cardFor(view: MarketView, ref: Ref): Card {
   const id = view.market.id;
   return renderCard(view.market, view.verdict, view.payout,
     { buyYes: marketUrl(id, ref, "yes"), buyNo: marketUrl(id, ref, "no"), details: marketUrl(id, ref), blink: blinkFor(id, ref) },
-    { now: Math.floor(Date.now() / 1000), sandbox: view.sandbox, buyable: view.buyable });
+    { now: Math.floor(Date.now() / 1000), sandbox: view.sandbox, practice: view.practice, buyable: view.buyable });
 }
 
 export function draftPreview(d: MarketDraft, problems: string[]): string {
@@ -121,8 +121,12 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     "🏺 <b>Pot</b>: prediction markets for your group, powered by Panta.",
     "",
     "1) A group admin types <code>/new Will Nigeria beat Benin Fri 5pm?</code>. I draft a clear rule and sources.",
-    "2) The admin taps Create and pays the Panta fee ($20 breaking / $50 standard) from their wallet. The admin earns up to 20% of the pot.",
-    "3) Members tap Buy YES / Buy NO and sign in Phantom. I post the pot as it grows, then the result and claim links.",
+    SANDBOX
+      ? "2) The admin taps Create and signs a free message in Phantom. Right now this is a practice market: no fee is charged (live markets cost $20 breaking / $50 standard)."
+      : "2) The admin taps Create and pays the Panta fee ($20 breaking / $50 standard) from their wallet. The admin earns up to 20% of the pot.",
+    SANDBOX
+      ? "3) Members tap Buy YES / Buy NO and sign a free message (no real money). I post the pot as it grows, so you can see how a real market would move."
+      : "3) Members tap Buy YES / Buy NO and sign in Phantom. I post the pot as it grows, then the result and claim links.",
     "",
     "Every card shows a verdict (Thin / Crowded / Overconfident / Ordinary) so nobody mistakes a thin price for a real crowd, plus 'pays about $X if right' from the pool.",
     "Commands: /new /markets /share /top /mine /link /admin",
@@ -240,7 +244,9 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     }
     const open = (await listOpenViews(8).catch(() => [])).slice(0, 3);
     if (!open.length) return ctx.reply("No open markets yet. An admin can start one with /new.");
-    await ctx.reply(`No markets in this chat yet. Here are open Panta markets (admins: <code>/post &lt;id&gt;</code> to pin one here):`, { parse_mode: "HTML" });
+    await ctx.reply(SANDBOX
+      ? `No markets in this chat yet. An admin can start one with /new. Meanwhile, here are practice markets from other groups:`
+      : `No markets in this chat yet. Here are open Panta markets (admins: <code>/post &lt;id&gt;</code> to pin one here):`, { parse_mode: "HTML" });
     for (const v of open) {
       const m = cardMessage(cardFor(v, groupRef(ctx)));
       await ctx.reply(`${m.text}\n<code>${v.market.id}</code>`, { parse_mode: "HTML", reply_markup: m.reply_markup, link_preview_options: { is_disabled: true } });
@@ -278,16 +284,24 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
 
   bot.command("top", async (ctx) => {
     if (!ctx.chat) return;
-    if (!isGroup(ctx)) return ctx.reply("Use /top in a group to see who brought the most new traders.");
+    if (!isGroup(ctx)) return ctx.reply("Use /top in a group to see who's buying and who brought new traders.");
     const b = await groupLeaderboard(ctx.chat.id);
-    const lines = [
-      `🏆 <b>Pot leaderboard</b>`,
-      `This group: ${b.totals.wallets} wallet${b.totals.wallets === 1 ? "" : "s"} · ${b.totals.newToPanta} new to Panta · ${usd(b.totals.volumeUsdc)} volume · ${b.totals.buys} buys`,
-    ];
+    const lines = [`🏆 <b>Pot leaderboard</b>`];
+    if (!b.totals.buys) {
+      lines.push("", "No buys yet. Share a market in your group to get started.", "Tip: /share gives you your own link, so buys through it count for you here.");
+      return ctx.reply(lines.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML" });
+    }
+    const pl = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    lines.push(`This group: ${pl(b.totals.wallets, "wallet")} · ${usd(b.totals.volumeUsdc)} in ${pl(b.totals.buys, "buy")}${b.totals.newToPanta ? ` · ${b.totals.newToPanta} new to Panta` : ""}`);
+    const people = (await topPeople(10, ctx.chat.id)).filter((p) => p.buys > 0);
+    if (people.length) {
+      lines.push("", "<b>Top buyers</b>");
+      for (const [i, p] of people.entries()) lines.push(`${i + 1}. ${esc(p.name)}: ${usd(p.volume)} in ${pl(p.buys, "buy")}`);
+    }
     if (b.members.length) {
-      lines.push("", "<b>Who brought traders</b> (via /share links):");
-      for (const [i, m] of b.members.entries()) lines.push(`${i + 1}. ${esc((await memberName(m.sharer_tg_id)) ?? `user ${m.sharer_tg_id}`)}: ${m.new_wallets} new wallet${m.new_wallets === 1 ? "" : "s"}, ${usd(m.volume)}`);
-    } else lines.push("", "No shared-link buys yet. Use /share to get your own link.");
+      lines.push("", "<b>Brought new traders</b> (via /share links)");
+      for (const [i, m] of b.members.entries()) lines.push(`${i + 1}. ${esc((await memberName(m.sharer_tg_id)) ?? "a member")}: ${pl(m.new_wallets, "new wallet")}, ${usd(m.volume)}`);
+    } else lines.push("", "Nobody has brought a trader through a /share link yet. Use /share to get yours.");
     await ctx.reply(lines.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML" });
   });
 
@@ -310,6 +324,18 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     if (isGroup(ctx)) return ctx.reply(`Your positions are private. DM me: https://t.me/${botUser()}?start=link`);
     const wallets = await walletsFor(ctx.from.id);
     if (!wallets.length) return sendLink(ctx);
+    if (SANDBOX) {
+      const pos = await practicePositions(wallets).catch(() => null);
+      const out: string[] = ["📒 <b>Your practice positions</b>"];
+      if (!pos) out.push("", "Couldn't load your positions right now. Try again in a minute.");
+      else if (!pos.length) out.push("", "No practice buys yet. Open a market card in your group and tap a Buy button.", `Linked wallet${wallets.length === 1 ? "" : "s"}: ${wallets.map(shortW).join(", ")}`);
+      for (const p of (pos ?? []).slice(0, 15)) {
+        out.push("", `• <b>${p.side.toUpperCase()} ${usd(p.amountUsdc)}</b> on ${esc(p.title)}`,
+          `   ${p.shares.toFixed(2)} shares · pays about ${usd(p.paysIfWin)} if ${p.side.toUpperCase()} wins`,
+          `   ${p.open ? `Buying open until ${fmtWat(p.closes)}` : "Buying closed, waiting for the result"} · ${esc(`${WEB_URL}/m/${p.marketId}`)}`);
+      }
+      return ctx.reply(out.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+    }
     const out: string[] = ["📒 <b>Your positions</b>"];
     for (const w of wallets) {
       const pos = await getPositions(w).catch(() => null);
@@ -377,10 +403,15 @@ export async function notifyTick(bot: Bot) {
     try {
       const v = await getMarketView(b.market_id).catch(() => null);
       const title = v ? v.market.title : b.market_id.slice(0, 8) + "…";
-      const pot = v ? ` · pot now ${usd(v.market.totalVolumeUsdc || v.market.volumeUsdc)}` : "";
+      const owner = await walletOwnerName(b.wallet).catch(() => null);
+      const buyer = owner ? `${esc(owner)} (${shortW(b.wallet)})` : shortW(b.wallet);
       const who = b.sharer_tg_id ? ` via ${esc(await memberName(b.sharer_tg_id) ?? "a member")}'s link` : "";
-      const fresh = b.new_to_panta ? " · 🎉 first ever Panta trade for this wallet" : b.new_to_pot ? " · first Pot buy for this wallet" : "";
-      await bot.api.sendMessage(b.chat_id!, `${b.side === "yes" ? "🟩" : "🟥"} ${shortW(b.wallet)} bought <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)} on <b>${esc(title)}</b>${who}${pot}${fresh}${SANDBOX ? " 🧪" : ""}`, { parse_mode: "HTML" });
+      const fresh = b.new_to_panta ? "\n🎉 First ever Panta trade for this wallet" : b.new_to_pot ? "\n👋 First Pot buy for this wallet" : "";
+      const yes = v?.verdict.numbers.yesSplit;
+      const state = v ? `\nPot now ${usd(v.market.totalVolumeUsdc || v.market.volumeUsdc)}${yes != null ? ` · YES ${Math.round(yes * 100)}% / NO ${100 - Math.round(yes * 100)}%` : ""} · ${esc(v.verdict.kind)}` : "";
+      const tag = v?.practice ? "\n🧪 <i>Practice market: no real money</i>" : SANDBOX ? " 🧪" : "";
+      const kb = v?.buyable ? new InlineKeyboard().url("Buy too", marketUrl(b.market_id, { kind: "group", chatId: Number(b.chat_id) })) : undefined;
+      await bot.api.sendMessage(b.chat_id!, `${b.side === "yes" ? "🟩" : "🟥"} ${buyer} bought <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)} on <b>${esc(title)}</b>${who}${state}${fresh}${tag}`, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
     } catch (e) {
       console.error("[bot] notify failed:", safeErr(e));
     }

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { WalletProviders } from "./WalletProviders";
@@ -18,6 +19,7 @@ export interface BuyPanelProps { marketId: string; initialSide?: Side; refStr: s
 function Inner(p: BuyPanelProps) {
   const { connection } = useConnection();
   const { publicKey, signTransaction, signMessage } = useWallet();
+  const router = useRouter();
   const [side, setSide] = useState<Side>(p.initialSide ?? "yes");
   const [amount, setAmount] = useState("5");
   const [step, setStep] = useState<Step>("idle");
@@ -44,6 +46,7 @@ function Inner(p: BuyPanelProps) {
     setStep("finishing"); setSig("signature" in proof ? proof.signature : "practice (free message signature)");
     const f = await api<Finish>("/api/pot/buy/finish", { orderId: q.orderId, quoteId: q.quoteId, ...proof, wallet: publicKey.toBase58(), marketId: p.marketId, side: q.side, amountUsdc: q.amountUsdc, ref: p.refStr, rs: p.rs, channel: "web" });
     setRes(f); setStep(f.status === "confirmed" ? "done" : "error");
+    if (f.status === "confirmed") router.refresh(); // show the updated pot, split and verdict
     if (f.status !== "confirmed") setMsg(`Panta reports the order as ${f.status}.`);
   }
 
@@ -99,7 +102,7 @@ function Inner(p: BuyPanelProps) {
           {(step === "signing" || step === "finishing") && <div className="text-sm text-stone-300">{step === "signing" ? (p.sandbox ? "Approve the free message in your wallet…" : "Waiting for your wallet and the network…") : "Confirming with Panta…"}</div>}
           {step === "done" && res && (
             <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">
-              ✅ {p.sandbox ? "Practice buy recorded. No real money moved." : "Bought!"} Panta status: {res.status}. {res.attributed ? "Credited to your group/sharer." : ""} {res.newToPanta ? "🎉 Your first Panta trade." : ""}
+              ✅ {p.sandbox ? "Practice buy recorded. No real money moved. The pot above now includes it." : `Bought! Panta status: ${res.status}.`} {res.attributed ? "Credited to your group/sharer." : ""} {res.newToPanta ? "🎉 Your first Panta trade." : ""}
               <div className="mt-1 break-all text-xs text-stone-400">Signature: {sig}</div>
             </div>
           )}

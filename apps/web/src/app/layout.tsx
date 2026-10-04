@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">
-        {SANDBOX && <div className="bg-amber-400 px-4 py-1 text-center text-xs font-semibold text-black">🧪 Practice mode: no real money. Pot uses Panta test data and your wallet only signs free messages, never payments.</div>}
+        {SANDBOX && <div className="bg-amber-400 px-4 py-1 text-center text-xs font-semibold text-black">🧪 Practice mode: no real money. Markets made here are practice markets, and your wallet only signs free messages, never payments.</div>}
         <header className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
           <Link href="/" className="text-xl font-black tracking-tight">🍯 Pot</Link>
           <nav className="flex items-center gap-4 text-sm text-stone-300">

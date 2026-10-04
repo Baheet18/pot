@@ -16,11 +16,15 @@ export function fmtAge(hours: number | null | undefined) {
 /** Times are shown in WAT (Africa/Lagos), the builder's zone. */
 export function fmtTime(unix: number | null | undefined) {
   if (!unix) return "—";
+  const d = new Date(unix * 1000);
+  const year = (x: Date) => x.toLocaleString("en-GB", { timeZone: "Africa/Lagos", year: "numeric" });
+  const sameYear = year(d) === year(new Date());
   return (
-    new Date(unix * 1000).toLocaleString("en-GB", {
+    d.toLocaleString("en-GB", {
       timeZone: "Africa/Lagos",
       day: "2-digit",
       month: "short",
+      ...(sameYear ? {} : { year: "numeric" }),
       hour: "2-digit",
       minute: "2-digit",
     }) + " WAT"

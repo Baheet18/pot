@@ -86,7 +86,7 @@ export function computeVerdict(m: MarketData, asOf: number, cfg: VerdictConfig =
     const walletsTxt = `${real} real wallet${real === 1 ? "" : "s"}`;
     const line =
       real === 0
-        ? "No real wallets yet. Only Panta's seed money is in this market, so the price is a placeholder."
+        ? "No real wallets yet. Only the starting seed money is in this market, so the price is a placeholder."
         : thinWallets && thinMoney
           ? `Only ${walletsTxt} and about ${usd(organic)} of real money so far; this price isn't saying much yet.`
           : thinWallets

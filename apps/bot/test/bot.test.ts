@@ -1,8 +1,11 @@
 import { M } from "../../../packages/server/test/env";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createBot, type Drafter } from "../src/bot";
+import { createBot, notifyTick, type Drafter } from "../src/bot";
+import { Keypair } from "@solana/web3.js";
+import nacl from "tweetnacl";
+import bs58 from "bs58";
 import { draftMarket, type MarketDraft } from "@pot/core";
-import { getDraft, linkGroupMarket, recordBuy, resetDbForTests, signRef, verify } from "@pot/server";
+import { finishBuyPractice, finishCreatePractice, getDraft, linkGroupMarket, linkWallet, recordBuy, resetDbForTests, saveDraft, signRef, startBuy, startCreate, upsertGroup, verify } from "@pot/server";
 
 type Sent = { method: string; payload: any };
 type U = { id: number; is_bot: boolean; first_name: string; username?: string };
@@ -47,7 +50,7 @@ describe("Pot bot", () => {
     await b.msg("/new Will Super Eagles beat Ghana on Saturday 8pm?");
     const r = b.replies()[0];
     expect(r.text).toContain("Market draft");
-    expect(r.text).toContain("Sandbox");
+    expect(r.text).toContain("Practice mode");
     const btns = r.reply_markup.inline_keyboard.flat();
     const create = btns.find((x: any) => x.text.startsWith("✅ Create"));
     expect(create).toBeTruthy();
@@ -110,6 +113,68 @@ describe("Pot bot", () => {
     await b.msg("/link", MEMBER, { id: 42, type: "private", first_name: "Ada" });
     const url = b.replies()[1].reply_markup.inline_keyboard[0][0].url as string;
     expect(verify<{ u: number; a: string }>(new URL(url).searchParams.get("t"))).toMatchObject({ u: 42, a: "link" });
+  });
+});
+
+describe("practice markets in Telegram (test mode)", () => {
+  const signText = (kp: Keypair, m: string) => bs58.encode(nacl.sign.detached(new TextEncoder().encode(m), kp.secretKey));
+  async function practiceMarket() {
+    const admin = Keypair.generate(), w = admin.publicKey.toBase58();
+    await upsertGroup(GROUP.id, GROUP.title);
+    const d = await saveDraft(GROUP.id, 7, draftMarket("Will Tinubu win the 2027 presidential election | 31 Mar 2027", { now: Math.floor(Date.now() / 1000) }));
+    const s = await startCreate(d.id, w);
+    return (await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, signText(admin, s.practiceMessage!))).marketId;
+  }
+  async function buy(id: string, kp: Keypair, side: "yes" | "no", amount: number) {
+    const ref = `g${GROUP.id}`, w = kp.publicKey.toBase58();
+    const s = await startBuy({ marketId: id, side, amountUsdc: amount, wallet: w, ref, rs: signRef(ref) });
+    await finishBuyPractice({ orderId: s.orderId, wallet: w, marketId: id, side, amountUsdc: amount, ref, rs: signRef(ref), channel: "telegram", practiceMessage: s.practiceMessage!, practiceSignature: signText(kp, s.practiceMessage!) });
+  }
+
+  it("/markets shows the group's own practice market with its real title, labelled", async () => {
+    const id = await practiceMarket();
+    const b = makeBot();
+    await b.msg("/markets", MEMBER);
+    const r = b.replies()[0];
+    expect(r.text).toContain("Practice market");
+    expect(r.text).toMatch(/Tinubu/);
+    expect(r.text).not.toContain("Sandbox test market");
+    expect(r.reply_markup.inline_keyboard.flat().map((x: any) => x.url).join(" ")).toContain(`/m/${id}`);
+  });
+
+  it("buy alerts name the market, the pot and the split; /mine lists practice positions; /top ranks buyers", async () => {
+    const id = await practiceMarket();
+    const kp = Keypair.generate();
+    await b0(id, kp);
+    async function b0(mid: string, k: Keypair) { await buy(mid, k, "yes", 10); await buy(mid, Keypair.generate(), "no", 4); }
+    const b = makeBot();
+    await b.msg("/help", MEMBER); // registers Ada's name
+    await linkWallet(42, kp.publicKey.toBase58());
+    await notifyTick(b.bot);
+    const alerts = b.sent.filter((s) => s.method === "sendMessage" && s.payload.chat_id === GROUP.id).map((s) => s.payload.text as string).filter((t) => t.includes(" bought "));
+    expect(alerts).toHaveLength(2);
+    expect(alerts.join("\n")).toMatch(/Ada .* bought <b>YES<\/b> \$10\.00 on <b>.*Tinubu/);
+    expect(alerts.join("\n")).toMatch(/Pot now \$19\.00 · YES \d+% \/ NO \d+%/);
+    expect(alerts.join("\n")).toContain("Practice market");
+
+    await b.msg("/mine", MEMBER, { id: 42, type: "private", first_name: "Ada" });
+    const mine = b.replies().at(-1).text as string;
+    expect(mine).toContain("Your practice positions");
+    expect(mine).toMatch(/YES \$10\.00<\/b> on .*Tinubu/);
+    expect(mine).toMatch(/pays about \$\d+\.\d\d if YES wins/);
+    expect(mine).toContain("Buying open until");
+
+    await b.msg("/top", MEMBER);
+    const top = b.replies().at(-1).text as string;
+    expect(top).toContain("Top buyers");
+    expect(top).toMatch(/1\. Ada: \$10\.00 in 1 buy/);
+    expect(top).not.toContain("Website");
+  });
+
+  it("/top with no buys shows a friendly empty state", async () => {
+    const b = makeBot();
+    await b.msg("/top", MEMBER);
+    expect(b.replies()[0].text).toContain("No buys yet. Share a market in your group to get started.");
   });
 });
 

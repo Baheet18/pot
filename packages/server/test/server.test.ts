@@ -82,21 +82,21 @@ describe("buy flow (sandbox fixtures)", () => {
   });
 });
 
-describe("create flow (sandbox fixtures)", () => {
-  it("quotes with an image + group userId, then registers and links to the group", async () => {
+describe("create flow (test mode = practice market)", () => {
+  it("never calls Panta, then stores the draft as a practice market linked to the group", async () => {
+    const kp = Keypair.generate(), w = kp.publicKey.toBase58();
     const d = await saveDraft(-77, 9, draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm", { now: Math.floor(Date.now() / 1000) }));
-    const s = await startCreate(d.id, W);
-    expect(s.createId).toBe("cr_sandbox_test");
+    const s = await startCreate(d.id, w);
+    expect(s.createId).toMatch(/^cr_p_/);
     expect(s.transaction).toBe(""); // practice mode: no transaction for the wallet
-    expect(parsePracticeMessage(s.practiceMessage!)).toMatchObject({ action: "create", wallet: W, ref: "cr_sandbox_test" });
-    const q = calls.find((c) => c.path === "/markets/create/quote/")!.body;
-    expect(q.imageUrl).toMatch(/^https:\/\//);
-    expect(q.userId).toBe("pot:g-77");
-    const f = await finishCreate(d.id, s.createId, "sandbox_create123");
-    expect(f.marketId).toBe(M);
+    expect(parsePracticeMessage(s.practiceMessage!)).toMatchObject({ action: "create", wallet: w, ref: s.createId });
+    expect(calls.filter((c) => c.path.startsWith("/markets/create"))).toHaveLength(0);
+    const f = await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, signText(kp, s.practiceMessage!));
+    expect(f.marketId).not.toBe(M);
+    expect(f.practice).toBe(true);
     expect((await getDraft(d.id))?.status).toBe("created");
-    expect((await groupMarkets(-77))[0]).toMatchObject({ market_id: M, created_by_group: 1, creator_wallet: W });
-    await expect(startCreate(d.id, W)).rejects.toThrow(/already/);
+    expect((await groupMarkets(-77))[0]).toMatchObject({ market_id: f.marketId, created_by_group: 1, creator_wallet: w });
+    await expect(startCreate(d.id, w)).rejects.toThrow(/already/);
   });
 });
 
@@ -148,7 +148,8 @@ describe("practice mode (no transactions, ever)", () => {
     const sig = signText(kp, s.practiceMessage!);
     await expect(finishCreatePractice(d.id, s.createId, W, s.practiceMessage!, sig)).rejects.toThrow(/same wallet/);
     const f = await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, sig);
-    expect(f.marketId).toBe(M);
+    expect(f.marketId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+    await expect(finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, sig)).rejects.toThrow(/already/);
     expect((await getDraft(d.id))?.status).toBe("created");
   });
 
