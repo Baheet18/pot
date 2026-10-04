@@ -18,10 +18,11 @@ export async function actionGetFor(id: string, refRaw: string | null, rsRaw: str
   const payload = marketActionGet({
     marketId: id, title: v.market.title, icon: actionIcon(v),
     yesPct: v.stats.yesSplit, paysYes: v.payout.perYesShare, paysNo: v.payout.perNoShare,
-    buyable: v.buyable, ref, rs: ref.startsWith("g") ? signRef(ref) : null, sandbox: SANDBOX,
+    buyable: v.buyable, ref, rs: ref.startsWith("g") ? signRef(ref) : null, sandbox: SANDBOX, result: resultOf(v),
   });
   return { payload, view: v, ref };
 }
 
+const resultOf = (v: MarketView): "yes" | "no" | null => (v.market.isResolved && v.market.yesWins !== null ? (v.market.yesWins ? "yes" : "no") : null);
 export const shareTextFor = (v: MarketView) =>
-  shareText({ title: v.market.title, yesPct: v.stats.yesSplit, practice: v.practice || v.sandbox });
+  shareText({ title: v.market.title, yesPct: v.stats.yesSplit, practice: v.practice || v.sandbox, result: resultOf(v) });

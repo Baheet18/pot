@@ -51,6 +51,8 @@ export function marketActionGet(opts: {
   ref: string;
   rs?: string | null;
   sandbox: boolean;
+  /** Set once the market has resolved. */
+  result?: "yes" | "no" | null;
 }): ActionGetResponse {
   const q = (side: "yes" | "no", amount?: number | string) =>
     `/api/actions/m/${opts.marketId}?side=${side}&amount=${amount ?? "{amount}"}&ref=${encodeURIComponent(opts.ref)}${opts.rs ? `&rs=${encodeURIComponent(opts.rs)}` : ""}`;
@@ -63,6 +65,10 @@ export function marketActionGet(opts: {
   ]
     .filter(Boolean)
     .join(" ");
+  if (opts.result) {
+    const r = opts.result.toUpperCase();
+    return { type: "action", icon: opts.icon, title: opts.title, description: `${opts.sandbox ? "🧪 Practice market. " : ""}Settled: the result is ${r}. Open the market for the receipt. Powered by Panta.`, label: `Result: ${r}`, disabled: true, error: { message: `This market has resolved ${r}.` } };
+  }
   if (!opts.buyable) {
     return { type: "action", icon: opts.icon, title: opts.title, description: desc, label: "Buying closed", disabled: true, error: { message: "This market is no longer in its buy-only phase." } };
   }
@@ -100,8 +106,9 @@ export function xIntentUrl(text: string, url: string) {
 }
 
 /** Short prefilled post text for sharing a market on X (kept well under X's limit; the URL is added by X). */
-export function shareText(opts: { title: string; yesPct: number | null; practice: boolean }) {
+export function shareText(opts: { title: string; yesPct: number | null; practice: boolean; result?: "yes" | "no" | null }) {
   const title = opts.title.length > 150 ? opts.title.slice(0, 147).replace(/\s+\S*$/, "") + "…" : opts.title;
+  if (opts.result) return `${title} Resolved ${opts.result.toUpperCase()}. See who won on Pot${opts.practice ? " (practice market)" : ""}:`;
   const split = opts.yesPct === null ? "" : ` Right now ${Math.round(opts.yesPct * 100)}% of the money says YES.`;
   return `${title}${split} Pick a side on Pot${opts.practice ? " (practice market, no real money)" : ""}:`;
 }

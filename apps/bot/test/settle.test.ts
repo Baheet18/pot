@@ -5,7 +5,7 @@ import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { draftMarket } from "@pot/core";
 import {
-  buildReceipt, claimReceipt, finishBuyPractice, finishCreatePractice, getMarketView, linkWallet, practicePositions, resetDbForTests, saveDraft,
+  actionGetFor, shareTextFor, buildReceipt, claimReceipt, finishBuyPractice, finishCreatePractice, getMarketView, linkWallet, practicePositions, resetDbForTests, saveDraft,
   settlePracticeMarket, signRef, startBuy, startCreate, upsertGroup, upsertMember,
 } from "@pot/server";
 import { createBot, postReceipt, settleTick } from "../src/bot";
@@ -100,6 +100,15 @@ describe("settlement receipts (practice markets)", () => {
     const yesShares = v.trades.filter((x) => x.side === "yes").reduce((s, x) => s + Number(x.shares), 0);
     expect(yesShares * r.perWinningShare! + r.royaltyUsdc).toBeCloseTo(r.potUsdc, 4);
     void tolu;
+    // Blink and X share text say it's settled; the bot card shows the result and no buy buttons.
+    const blink = (await actionGetFor(id, null, null)).payload;
+    expect(blink.disabled).toBe(true);
+    expect(blink.label).toBe("Result: YES");
+    expect(shareTextFor(v)).toMatch(/Resolved YES\. See who won on Pot/);
+    const { cardFor } = await import("../src/bot");
+    const card = cardFor(v, { kind: "web" });
+    expect(card.html).toContain("Result: YES");
+    expect(card.keyboard.flat().some((x) => /Buy YES/.test(x.text))).toBe(false);
   });
 
   it("/settle: admins only, only in the market's own group, after kick-off; posts one receipt; buying stops", async () => {
