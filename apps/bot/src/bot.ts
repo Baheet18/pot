@@ -3,7 +3,7 @@ import type { UserFromGetMe } from "grammy/types";
 import { draftMarket, esc, fmtWat, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
-  marketUrl, markNotified, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
+  marketUrl, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
   walletsFor, blinkFor, WEB_URL, listOpenViews, type MarketView,
 } from "@pot/server";
 
@@ -85,8 +85,8 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   const botUser = () => bot.botInfo?.username ?? "pantapotbot";
 
   bot.use(async (ctx, next) => {
-    if (ctx.from && !ctx.from.is_bot) upsertMember(ctx.from.id, ctx.from.username ? `@${ctx.from.username}` : [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" "));
-    if (isGroup(ctx) && ctx.chat) upsertGroup(ctx.chat.id, "title" in ctx.chat ? ctx.chat.title : undefined);
+    if (ctx.from && !ctx.from.is_bot) await upsertMember(ctx.from.id, ctx.from.username ? `@${ctx.from.username}` : [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" "));
+    if (isGroup(ctx) && ctx.chat) await upsertGroup(ctx.chat.id, "title" in ctx.chat ? ctx.chat.title : undefined);
     await next();
   });
 
@@ -118,28 +118,28 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
       return ctx.reply((e as Error).message);
     }
     const problems = validateDraft(draft);
-    const row = saveDraft(ctx.chat.id, ctx.from.id, draft);
+    const row = await saveDraft(ctx.chat.id, ctx.from.id, draft);
     const kb = new InlineKeyboard();
     if (!problems.length) kb.text(`✅ Create ($${draft.creationFeeUsdc})`, `create:${row.id}`);
     kb.text("❌ Cancel", `cancel:${row.id}`);
     const msg = await ctx.reply(draftPreview(draft, problems), { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
-    updateDraft(row.id, { message_id: msg.message_id });
+    await updateDraft(row.id, { message_id: msg.message_id });
   });
 
   bot.callbackQuery(/^cancel:(d_[\w-]+)$/, async (ctx) => {
-    const row = getDraft(ctx.match[1]);
+    const row = await getDraft(ctx.match[1]);
     if (!row || row.admin_id !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Only the admin who drafted this can cancel it." });
-    if (row.status !== "created") updateDraft(row.id, { status: "cancelled" });
+    if (row.status !== "created") await updateDraft(row.id, { status: "cancelled" });
     await ctx.answerCallbackQuery({ text: "Draft cancelled" });
     await ctx.editMessageText("❌ Draft cancelled.");
   });
 
   bot.callbackQuery(/^create:(d_[\w-]+)$/, async (ctx) => {
-    const row = getDraft(ctx.match[1]);
+    const row = await getDraft(ctx.match[1]);
     if (!row) return ctx.answerCallbackQuery({ text: "Draft not found." });
     if (row.admin_id !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Only the admin who drafted this can create it." });
     if (row.status === "created") return ctx.answerCallbackQuery({ text: "Already created." });
-    updateDraft(row.id, { status: "confirmed" });
+    await updateDraft(row.id, { status: "confirmed" });
     const t = sign({ d: row.id, u: ctx.from.id }, 2 * 3600);
     const url = `${WEB_URL}/create/${row.id}?t=${t}`;
     await ctx.answerCallbackQuery({ text: "Open the link to sign and pay." });
@@ -162,7 +162,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
 
   bot.command("markets", async (ctx) => {
     if (!ctx.chat) return;
-    const rows = isGroup(ctx) ? groupMarkets(ctx.chat.id).slice(0, 5) : [];
+    const rows = isGroup(ctx) ? (await groupMarkets(ctx.chat.id)).slice(0, 5) : [];
     if (rows.length) {
       for (const r of rows) await sendCard(ctx, r.market_id, groupRef(ctx));
       return;
@@ -182,7 +182,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
     if (!id || !isMarketId(id)) return ctx.reply("Usage: /post <marketId>");
     if (!(await isAdmin(ctx))) return ctx.reply("Only group admins can post markets.");
     const msg = await sendCard(ctx, id, groupRef(ctx));
-    if (isGroup(ctx) && msg && "message_id" in msg) linkGroupMarket(ctx.chat.id, id, { cardMessageId: msg.message_id });
+    if (isGroup(ctx) && msg && "message_id" in msg) await linkGroupMarket(ctx.chat.id, id, { cardMessageId: msg.message_id });
   });
 
   bot.command("market", async (ctx) => {
@@ -194,7 +194,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   bot.command("share", async (ctx) => {
     if (!ctx.chat || !ctx.from) return;
     let id = ctx.match?.toString().trim();
-    if (!id && isGroup(ctx)) id = groupMarkets(ctx.chat.id)[0]?.market_id;
+    if (!id && isGroup(ctx)) id = (await groupMarkets(ctx.chat.id))[0]?.market_id;
     if (!id || !isMarketId(id)) return ctx.reply("Usage: /share <marketId> (or use it in a group with a market)");
     const ref = memberRef(ctx);
     const lines = [
@@ -208,14 +208,14 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   bot.command("top", async (ctx) => {
     if (!ctx.chat) return;
     if (!isGroup(ctx)) return ctx.reply("Use /top in a group to see who brought the most new traders.");
-    const b = groupLeaderboard(ctx.chat.id);
+    const b = await groupLeaderboard(ctx.chat.id);
     const lines = [
       `🏆 <b>Pot leaderboard</b>`,
       `This group: ${b.totals.wallets} wallet${b.totals.wallets === 1 ? "" : "s"} · ${b.totals.newToPanta} new to Panta · ${usd(b.totals.volumeUsdc)} volume · ${b.totals.buys} buys`,
     ];
     if (b.members.length) {
       lines.push("", "<b>Who brought traders</b> (via /share links):");
-      b.members.forEach((m, i) => lines.push(`${i + 1}. ${esc(memberName(m.sharer_tg_id) ?? `user ${m.sharer_tg_id}`)}: ${m.new_wallets} new wallet${m.new_wallets === 1 ? "" : "s"}, ${usd(m.volume)}`));
+      for (const [i, m] of b.members.entries()) lines.push(`${i + 1}. ${esc((await memberName(m.sharer_tg_id)) ?? `user ${m.sharer_tg_id}`)}: ${m.new_wallets} new wallet${m.new_wallets === 1 ? "" : "s"}, ${usd(m.volume)}`);
     } else lines.push("", "No shared-link buys yet. Use /share to get your own link.");
     await ctx.reply(lines.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML" });
   });
@@ -237,7 +237,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   bot.command("mine", async (ctx) => {
     if (!ctx.from) return;
     if (isGroup(ctx)) return ctx.reply(`Your positions are private. DM me: https://t.me/${botUser()}?start=link`);
-    const wallets = walletsFor(ctx.from.id);
+    const wallets = await walletsFor(ctx.from.id);
     if (!wallets.length) return sendLink(ctx);
     const out: string[] = ["📒 <b>Your positions</b>"];
     for (const w of wallets) {
@@ -257,7 +257,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
   bot.command("admin", async (ctx) => {
     if (!ctx.chat) return;
     if (!(await isAdmin(ctx))) return ctx.reply("Only group admins can open the creator dashboard.");
-    const rows = groupMarkets(ctx.chat.id).filter((r) => r.created_by_group);
+    const rows = (await groupMarkets(ctx.chat.id)).filter((r) => r.created_by_group);
     if (!rows.length) return ctx.reply("This group hasn't created a market yet. Start one with /new.");
     const out = ["🧾 <b>Creator dashboard</b>"];
     let total = 0;
@@ -279,33 +279,33 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe } = {})
 
 /** Posts new buys and phase changes into groups. Runs on an interval in main.ts. */
 export async function notifyTick(bot: Bot) {
-  for (const b of unnotifiedBuys()) {
+  for (const b of await unnotifiedBuys()) {
+    if (!(await claimNotify(b.signature))) continue; // another instance already took it
     try {
       const v = await getMarketView(b.market_id).catch(() => null);
       const title = v ? v.market.title : b.market_id.slice(0, 8) + "…";
       const pot = v ? ` · pot now ${usd(v.market.totalVolumeUsdc || v.market.volumeUsdc)}` : "";
-      const who = b.sharer_tg_id ? ` via ${esc(memberName(b.sharer_tg_id) ?? "a member")}'s link` : "";
+      const who = b.sharer_tg_id ? ` via ${esc(await memberName(b.sharer_tg_id) ?? "a member")}'s link` : "";
       const fresh = b.new_to_panta ? " · 🎉 first ever Panta trade for this wallet" : b.new_to_pot ? " · first Pot buy for this wallet" : "";
       await bot.api.sendMessage(b.chat_id!, `${b.side === "yes" ? "🟩" : "🟥"} ${shortW(b.wallet)} bought <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)} on <b>${esc(title)}</b>${who}${pot}${fresh}${SANDBOX ? " 🧪" : ""}`, { parse_mode: "HTML" });
     } catch (e) {
       console.error("[bot] notify failed:", (e as Error).message);
     }
-    markNotified(b.signature);
   }
 }
 
 export async function settleTick(bot: Bot) {
-  for (const r of allGroupMarkets().filter((x) => !x.settled_notified)) {
+  for (const r of (await allGroupMarkets()).filter((x) => !x.settled_notified)) {
     const v = await getMarketView(r.market_id).catch(() => null);
     if (!v) continue;
     const phase = v.market.isResolved ? "resolved" : v.market.phase;
     if (phase === r.last_phase) continue;
-    setGroupMarketState(r.chat_id, r.market_id, { last_phase: phase });
+    if (!(await claimPhase(r.chat_id, r.market_id, r.last_phase, phase))) continue; // another instance handled it
     if (!r.last_phase) continue; // first observation: just remember it
     try {
       if (phase === "resolved") {
         await bot.api.sendMessage(r.chat_id, `🏁 <b>${esc(v.market.title)}</b> resolved <b>${v.market.yesWins ? "YES" : "NO"}</b>. Winners: DM me /mine to claim.${r.created_by_group ? " Admin: /admin for your royalty." : ""}`, { parse_mode: "HTML" });
-        setGroupMarketState(r.chat_id, r.market_id, { settled_notified: 1 });
+        await setGroupMarketState(r.chat_id, r.market_id, { settled_notified: 1 });
       } else if (phase === "secondary") {
         await bot.api.sendMessage(r.chat_id, `🔒 Buying closed on <b>${esc(v.market.title)}</b>. Final pot ${usd(v.market.totalVolumeUsdc)}. ${r.created_by_group ? `Creator royalty ≈ ${usd(v.royalty.estimatedUsdc)} (/admin).` : ""}`, { parse_mode: "HTML" });
       }
@@ -313,4 +313,13 @@ export async function settleTick(bot: Bot) {
       console.error("[bot] settle notify failed:", (e as Error).message);
     }
   }
+}
+
+/** Posts a market card into a group (used right after the group's admin creates a market on the web). */
+export async function postMarketCard(bot: Bot, chatId: number, marketId: string, intro?: string) {
+  const view = await getMarketView(marketId);
+  const m = cardMessage(cardFor(view, { kind: "group", chatId }));
+  const msg = await bot.api.sendMessage(chatId, intro ? `${intro}\n\n${m.text}` : m.text, { parse_mode: "HTML", reply_markup: m.reply_markup, link_preview_options: { is_disabled: true } });
+  await linkGroupMarket(chatId, marketId, { cardMessageId: msg.message_id });
+  return msg.message_id;
 }

@@ -34,7 +34,7 @@ function makeBot(adminIds: number[] = [7]) {
   return { bot, sent, msg, tap, replies };
 }
 
-beforeEach(() => resetDbForTests(":memory:"));
+beforeEach(async () => { await resetDbForTests(":memory:"); });
 
 describe("Pot bot", () => {
   it("/new drafts a market with Create/Cancel buttons; the create button gives a signed link", async () => {
@@ -47,7 +47,7 @@ describe("Pot bot", () => {
     const create = btns.find((x: any) => x.text.startsWith("✅ Create"));
     expect(create).toBeTruthy();
     const draftId = create.callback_data.split(":")[1];
-    expect(getDraft(draftId)?.chat_id).toBe(GROUP.id);
+    expect((await getDraft(draftId))?.chat_id).toBe(GROUP.id);
 
     await b.tap(`create:${draftId}`, MEMBER); // not the drafting admin
     expect(b.sent.find((s) => s.method === "answerCallbackQuery")!.payload.text).toMatch(/Only the admin/);
@@ -67,7 +67,7 @@ describe("Pot bot", () => {
 
   it("/markets shows the group's market as a card with verdict and signed group ref buttons", async () => {
     const b = makeBot();
-    linkGroupMarket(GROUP.id, M, { createdByGroup: true });
+    await linkGroupMarket(GROUP.id, M, { createdByGroup: true });
     await b.msg("/markets", MEMBER);
     const r = b.replies()[0];
     expect(r.text).toMatch(/Thin|Ordinary|Crowded|Overconfident/);
@@ -80,7 +80,7 @@ describe("Pot bot", () => {
 
   it("/share gives a member-attributed link and Blink", async () => {
     const b = makeBot();
-    linkGroupMarket(GROUP.id, M);
+    await linkGroupMarket(GROUP.id, M);
     await b.msg("/share", MEMBER);
     const t = b.replies()[0].text as string;
     expect(t).toContain(`ref=g${GROUP.id}u42`);
@@ -90,7 +90,7 @@ describe("Pot bot", () => {
   it("/top shows group totals and who brought traders", async () => {
     const b = makeBot();
     await b.msg("/help", MEMBER); // registers Ada's name
-    recordBuy({ signature: "s1", marketId: M, wallet: "W1", side: "yes", amountUsdc: 5, ref: `g${GROUP.id}u42`, pantaUserId: "x", chatId: GROUP.id, sharerTgId: 42, sharerX: null, newToPanta: true, pantaStatus: "confirmed", attributed: true, channel: "web" });
+    await recordBuy({ signature: "s1", marketId: M, wallet: "W1", side: "yes", amountUsdc: 5, ref: `g${GROUP.id}u42`, pantaUserId: "x", chatId: GROUP.id, sharerTgId: 42, sharerX: null, newToPanta: true, pantaStatus: "confirmed", attributed: true, channel: "web" });
     await b.msg("/top", MEMBER);
     const t = b.replies().at(-1).text as string;
     expect(t).toContain("1 wallet");

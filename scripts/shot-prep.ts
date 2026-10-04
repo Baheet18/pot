@@ -5,7 +5,7 @@ import { getMarketView, saveDraft, sign } from "@pot/server";
 import { cardFor, cardMessage, draftPreview } from "../apps/bot/src/bot";
 (async () => {
   const d = draftMarket("Will Super Eagles beat Ghana on Saturday 8pm?");
-  const row = saveDraft(-1009990001, 7, d);
+  const row = await saveDraft(-1009990001, 7, d);
   writeFileSync("shots/.create_url", `http://localhost:3100/create/${row.id}?t=${sign({ d: row.id, u: 7 }, 3 * 3600)}`);
   const v = await getMarketView("TestMarket1111111111111111111111111111111");
   const card = cardFor(v, { kind: "group", chatId: -1009990001 });

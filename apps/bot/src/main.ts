@@ -8,6 +8,12 @@ if (!token) {
 }
 const bot = createBot(token);
 await bot.init();
+// Long polling deletes any webhook. Never steal updates from the hosted (webhook) bot by accident.
+const hook = await bot.api.getWebhookInfo();
+if (hook.url && process.env.POT_FORCE_POLLING !== "1") {
+  console.log(`[bot] A webhook is active (${new URL(hook.url).host}); the hosted bot is the consumer. Not starting polling (set POT_FORCE_POLLING=1 to override).`);
+  process.exit(0);
+}
 console.log(`[bot] @${bot.botInfo.username} starting (mode=${MODE}, web=${WEB_URL})`);
 await bot.api.setMyCommands(COMMANDS).catch((e) => console.error("[bot] setMyCommands failed:", e.message));
 let busy = false;

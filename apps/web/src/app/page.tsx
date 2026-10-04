@@ -7,7 +7,8 @@ import { VERDICT_STYLE } from "@/components/VerdictBadge";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [views, t, board] = await Promise.all([listOpenViews(12).catch(() => []), Promise.resolve(totals()), Promise.resolve(globalLeaderboard().slice(0, 5))]);
+  const [views, t, board] = await Promise.all([listOpenViews(12).catch(() => []), totals(), globalLeaderboard().then((r) => r.slice(0, 5))]);
+  const titles = await Promise.all(board.map((r) => (r.chat_id !== null ? groupTitle(r.chat_id) : Promise.resolve(null))));
   return (
     <div className="space-y-10">
       <section className="py-6">
@@ -43,7 +44,7 @@ export default async function Home() {
           <h2 className="mb-3 text-lg font-bold">Top groups</h2>
           {board.length === 0 ? <p className="text-sm text-stone-400">No buys yet.</p> : (
             <ol className="space-y-1 text-sm">{board.map((r, i) => (
-              <li key={i} className="flex justify-between"><span>{i + 1}. {r.source === "group" ? groupTitle(r.chat_id!) ?? "A group" : r.source === "x" ? `@${r.sharer_x}` : "Website"}</span><span className="text-stone-400">{r.new_to_panta} new · {r.wallets} wallets · {fmtUsd(r.volume)}</span></li>
+              <li key={i} className="flex justify-between"><span>{i + 1}. {r.source === "group" ? titles[i] ?? "A group" : r.source === "x" ? `@${r.sharer_x}` : "Website"}</span><span className="text-stone-400">{r.new_to_panta} new · {r.wallets} wallets · {fmtUsd(r.volume)}</span></li>
             ))}</ol>
           )}
         </div>

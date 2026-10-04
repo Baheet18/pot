@@ -9,13 +9,13 @@ export default async function CreatePage({ params, searchParams }: { params: Pro
   const { draftId } = await params;
   const token = sp((await searchParams).t) ?? "";
   const t = verify<{ d: string; u: number }>(token);
-  const row = t && t.d === draftId ? getDraft(draftId) : null;
+  const row = t && t.d === draftId ? await getDraft(draftId) : null;
   if (!row) return <div className="card mx-auto max-w-lg p-6"><h1 className="text-xl font-bold">This create link has expired</h1><p className="mt-2 text-stone-300">Go back to your group and tap ✅ Create again.</p></div>;
   const d = row.draft;
   return (
     <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-[1fr_340px]">
       <div className="card space-y-3 p-6">
-        <div className="text-xs uppercase tracking-wide text-stone-400">New market for {groupTitle(row.chat_id) ?? "your group"} · {d.marketType} · {d.category}</div>
+        <div className="text-xs uppercase tracking-wide text-stone-400">New market for {await groupTitle(row.chat_id) ?? "your group"} · {d.marketType} · {d.category}</div>
         <h1 className="text-2xl font-black">{d.title}</h1>
         <p className="whitespace-pre-line text-sm text-stone-300">{d.resolutionRule}</p>
         <div className="grid grid-cols-2 gap-2 text-sm">

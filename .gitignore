@@ -26,3 +26,5 @@ shots/.create_url
 *.db
 *.db-wal
 *.db-shm
+.vercel
+.env*

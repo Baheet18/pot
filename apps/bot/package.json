@@ -1,4 +1,4 @@
-{ "name": "@pot/bot", "version": "0.1.0", "private": true, "type": "module",
+{ "name": "@pot/bot", "version": "0.1.0", "private": true, "type": "module", "main": "src/bot.ts", "types": "src/bot.ts",
   "scripts": { "dev": "tsx src/main.ts", "start": "tsx src/main.ts" },
   "dependencies": { "@pot/core": "*", "@pot/server": "*", "grammy": "^1.30.0" },
   "devDependencies": { "tsx": "^4.19.2" } }

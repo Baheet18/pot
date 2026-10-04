@@ -63,8 +63,8 @@ async function main() {
 
   // Test group + member so leaderboards have names.
   const chatId = -1009990001;
-  upsertGroup(chatId, "Baheet test group");
-  upsertMember(42, "Ada");
+  await upsertGroup(chatId, "Baheet test group");
+  await upsertMember(42, "Ada");
 
   // 1) Blink: GET → POST → sign → next
   const get = await j(`/api/actions/m/${MARKET}?ref=xbaheet_`);
@@ -91,7 +91,7 @@ async function main() {
 
   // 3) Create market from a /new-style draft
   const draft = draftMarket("Will Super Eagles beat Ghana on Saturday 8pm?", { now: Math.floor(Date.now() / 1000) });
-  const row = saveDraft(chatId, 7, draft);
+  const row = await saveDraft(chatId, 7, draft);
   const t = sign({ d: row.id, u: 7 }, 3600);
   const cs = await j("/api/pot/create/start", { method: "POST", body: JSON.stringify({ draftId: row.id, token: t, wallet }) });
   log("create start", { title: draft.title, type: draft.marketType, fee: cs.feeUsdc, hasTx: !!cs.transaction });
@@ -108,7 +108,7 @@ async function main() {
   log("link with wrong message rejected", bad.status);
 
   // 5) Leaderboard
-  log("group leaderboard", groupLeaderboard(chatId));
+  log("group leaderboard", await groupLeaderboard(chatId));
 }
 
 main().catch((e) => { console.error("✘", e.message); process.exit(1); });

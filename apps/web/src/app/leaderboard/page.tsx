@@ -3,9 +3,10 @@ import { fmtUsd } from "@pot/core";
 
 export const dynamic = "force-dynamic";
 
-export default function Leaderboard() {
-  const rows = globalLeaderboard();
-  const t = totals();
+export default async function Leaderboard() {
+  const rows = await globalLeaderboard();
+  const t = await totals();
+  const titles = await Promise.all(rows.map((r) => (r.chat_id !== null ? groupTitle(r.chat_id) : Promise.resolve(null))));
   return (
     <div className="space-y-4">
       <h1 className="text-3xl font-black">Leaderboard</h1>
@@ -18,7 +19,7 @@ export default function Leaderboard() {
             {rows.map((r, i) => (
               <tr key={i} className="border-t border-white/5">
                 <td className="p-3">{i + 1}</td>
-                <td>{r.source === "group" ? `👥 ${groupTitle(r.chat_id!) ?? "Group"}` : r.source === "x" ? `𝕏 @${r.sharer_x}` : "🌐 Website"}</td>
+                <td>{r.source === "group" ? `👥 ${titles[i] ?? "Group"}` : r.source === "x" ? `𝕏 @${r.sharer_x}` : "🌐 Website"}</td>
                 <td><b>{r.new_to_panta}</b></td><td>{r.wallets}</td><td>{r.buys}</td><td>{fmtUsd(r.volume)}</td>
               </tr>
             ))}

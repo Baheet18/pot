@@ -1,46 +1,74 @@
-# 🍯 Pot — group prediction markets on Panta
+# 🍯 Pot: prediction markets for your group chat, powered by Panta
 
-**Pot** turns a Telegram group into a prediction-market crew:
+**Live (sandbox / test mode):** https://pot-navy.vercel.app · **Telegram:** [@pantapotbot](https://t.me/pantapotbot)
 
-1. An admin types `/new Will Super Eagles beat Ghana Sat 8pm?` in the group. `@pantapotbot` drafts a clear rule, sources, and times (WAT).
-2. The admin taps **✅ Create**, opens the link, and signs/pays the Panta fee in their own wallet. They become the creator and earn the royalty.
-3. Members tap **Buy YES / Buy NO** (or share a **Blink** on X). Every buy is credited to the group and to the member whose link was used (`/top`).
-4. Every card and page shows the **Reading Layer verdict** (Thin / Crowded / Overconfident / Ordinary) and "pays about $X if right".
+Pot turns a Telegram group into a prediction-market crew on [Panta](https://www.panta.market/):
 
-## Layout
-| Path | What |
+1. **Make it:** a group admin types `/new Will Super Eagles beat Ghana Sat 8pm?`. The bot drafts a fair market: a clear YES/NO rule, official sources, and times in WAT (Lagos time), plus breaking ($20) vs standard ($50) type.
+2. **Create it:** the admin taps **✅ Create**, opens the signed link, and signs/pays the Panta fee in **their own wallet** (Phantom). They become the creator and earn the creator royalty. The bot posts the market card in the group.
+3. **Join it:** members tap **Buy YES / Buy NO** and sign in Phantom, or share the market as a **Solana Blink** on X. Every buy is credited to the group and to the member whose link was used (`/top` leaderboard). The bot posts each buy, then "buying closed" and the result, with claim links.
+4. **Read it honestly:** every card, page and Blink carries the **Reading Layer verdict**, so nobody mistakes a thin price for a real crowd:
+   * 🌱 **Thin**: too few real wallets / too little real money for the price to mean much yet
+   * ⚠️ **Overconfident**: lopsided split that hasn't been tested by time, breadth or sellers
+   * 👥 **Crowded**: a broad, mature crowd leaning hard one way
+   * ✅ **Ordinary**: enough participation, no warning sign fired
+
+   Plus **"pays about $X per share if right"**, estimated from the pool (parimutuel math), never a promise.
+
+Pot never holds anyone's keys or money: every payment, buy and claim is signed by the user in their own wallet.
+
+## What's in the box
+| Part | What it does |
 |---|---|
-| `packages/core` | Pure logic: verdict, payout + royalty estimates, market drafting (chrono, WAT), Telegram card, Solana Actions payloads, refs |
-| `packages/server` | Panta client (rate limit, cache, write allowlist + live-write guard), SQLite store, signed tokens, flows (buy/create/claim/link), devnet-memo sandbox tx |
-| `apps/web` | Next.js 16 site on :3100: landing, `/m/[id]`, `/create/[draftId]`, `/claim/[id]`, `/link`, `/leaderboard`, `/actions.json`, `/api/actions/m/[id]` (Blinks), `/api/pot/*` |
-| `apps/bot` | grammY bot: `/new /markets /post /market /share /top /mine /link /admin`, buy alerts, phase/result posts |
-| `scripts/` | `sandbox-e2e.ts` (full flow vs local web), `record-sandbox-fixtures.ts`, `shot-prep.ts`, `secret-scan.py` |
+| **Telegram bot** (`apps/bot`, grammY) | `/new` `/markets` `/post` `/market` `/share` `/top` `/mine` `/link` `/admin` `/help`; buy alerts; phase and result posts. Runs as a **webhook** on the Vercel app (`/api/telegram/webhook`, checked with Telegram's `secret_token`), or with long polling locally. |
+| **Website** (`apps/web`, Next.js 16) | Landing + open markets, `/m/[id]` market page (verdict first, Phantom buy, share as Blink, "Open in Phantom" on mobile), `/create/[draftId]`, `/claim/[id]`, `/link` (free signed message links a wallet to Telegram), `/leaderboard` |
+| **Blinks / Solana Actions** | `/actions.json`, `GET/POST /api/actions/m/[id]` (YES/NO $2/$5/$10 + custom amount), chained `POST /api/actions/m/[id]/next` that confirms with Panta and records the buy. CORS + `X-Action-Version` / `X-Blockchain-Ids` headers. |
+| **Core logic** (`packages/core`) | Verdict engine, payout + creator-royalty estimates, market drafting (chrono-node, WAT), Telegram card renderer, Actions payloads, referral refs |
+| **Server** (`packages/server`) | Panta API client (rate limiter, cache, write allowlist, live-write guard), Postgres/SQLite store, HMAC-signed links and refs, buy/create/claim/link flows |
+
+## Panta API endpoints used (`https://live-api.panta.market/api/v1`)
+**Read:** `GET /markets/` · `GET /markets/{id}/` · `GET /markets/{id}/trades/` · `GET /positions/?wallet=` · `GET /wallets/{wallet}/trades/` · `GET /trades/{signature}/`
+
+**Buy (user signs):** `POST /primaryorderquote/` → `POST /primaryorderbuild/` → wallet signs + broadcasts → `POST /primaryordersubmit/` → `POST /primaryorderverify/` → `POST /trades/` (attribution, with `userId` / `X-User-Id` = the group or member ref)
+
+**Create (admin signs + pays):** `POST /markets/create/quote/` → `POST /markets/create/build/` → wallet signs → `POST /markets/register/`
+
+**Claims:** `POST /claim/build/` (winnings) · `POST /claim/creator-fees/build/` (creator royalty) → `POST /trades/` report
+
+Only these POST paths can be called at all (allowlist), and **with the live key every write is blocked** unless `POT_ALLOW_LIVE_WRITES=1` is set.
 
 ## Modes
-* `PANTA_MODE=test` (default): uses the `pk_test` key. Panta answers with **sandbox fixtures** (one test market, canned quote/build/submit/verify). Since the sandbox returns no instructions, Pot swaps in a **free devnet memo transaction** so the wallet sign → broadcast → submit path still runs. A "Simulate" button / `sandbox_…` signature works when devnet is unavailable.
-* `PANTA_MODE=live`: mainnet reads with the live key. **All writes stay blocked** unless `POT_ALLOW_LIVE_WRITES=1` is also set (Phase 2, with approval).
+* `PANTA_MODE=test` (default, and what the public deployment runs today): uses a `pk_test` key. Panta answers with **sandbox fixtures** (one test market, canned quote/build/verify; nothing touches mainnet). Because the sandbox returns no instructions, Pot swaps in a **free Solana devnet memo transaction**, so the real wallet sign → broadcast → submit path still runs. A "Simulate" button (`sandbox_…` signature) covers when devnet is busy.
+* `PANTA_MODE=live`: real mainnet markets with the live key. Writes still need `POT_ALLOW_LIVE_WRITES=1`.
 
-## Secrets (files, chmod 600; never env, never committed)
-| File | Used for |
-|---|---|
-| `~/.panta/api_key` | Panta `pk_live` key (override path: `PANTA_KEY_FILE`) |
-| `~/.panta/test_key` | Panta `pk_test` key (`PANTA_TEST_KEY_FILE`) |
-| `~/.pot/telegram_token` | Bot token for @pantapotbot (`POT_TELEGRAM_TOKEN_FILE`) |
-| `~/.pot/hmac_secret` | Signs create/link tokens and group refs; auto-created (`POT_HMAC_SECRET_FILE`) |
-
-The server refuses a key file that is not chmod 600. Turbopack's persistent cache is off so nothing is snapshotted to disk. Run `python3 scripts/secret-scan.py .` before committing (checks source, `.next`, `data/`).
-
-## Commands
+## Run it locally
 ```bash
 npm install
-npm test                 # vitest: core + server (sandbox fixtures, fetch mocked) + bot (fake updates)
+npm test                  # 59 tests: core, server (sandbox fixtures, fetch mocked), bot (fake Telegram updates)
 npm run typecheck
-npm run dev:web          # http://localhost:3100  (PANTA_MODE=test by default)
-npm run dev:bot          # long polling; exits politely if no token file
-npx tsx scripts/sandbox-e2e.ts   # Blink GET→POST→sign→next, web buy w/ group ref, create, wallet link, leaderboard
+npm run dev:web           # http://localhost:3100
+npm run dev:bot           # long polling (refuses to start while the hosted webhook is active)
+npx tsx scripts/sandbox-e2e.ts   # Blink GET→POST→sign→next, web buy with group ref, create, wallet link, leaderboard
 npm run build
 ```
 
-## Going live (not done in Phase 1)
-* Host web on a public **https** URL (Telegram URL buttons and Blinks need it), set `POT_PUBLIC_URL`; swap SQLite for a hosted DB if on serverless; run the bot as webhook or on a small always-on host.
-* Fund a real Phantom wallet, then `PANTA_MODE=live POT_ALLOW_LIVE_WRITES=1` only after approval.
+### Secrets: never in the repo
+Read at runtime only, from chmod-600 files locally or from Vercel **Secret** env vars when hosted:
+
+| Local file | Vercel env var | Purpose |
+|---|---|---|
+| `~/.panta/test_key` | `POT_PANTA_TEST_KEY` | Panta `pk_test` key |
+| `~/.panta/api_key` | `POT_PANTA_LIVE_KEY` | Panta `pk_live` key (not set on the deployment yet) |
+| `~/.pot/telegram_token` | `POT_TELEGRAM_TOKEN` | Bot token |
+| `~/.pot/hmac_secret` | `POT_HMAC_SECRET` | Signs create/link tokens and group refs |
+| `~/.pot/webhook_secret` | `POT_TELEGRAM_WEBHOOK_SECRET` | Telegram webhook `secret_token` |
+| – | `CRON_SECRET` | Protects the daily `/api/cron/settle` job |
+| – | `DATABASE_URL` | Hosted Postgres (Neon via Vercel Marketplace). Without it, SQLite is used. |
+
+`python3 scripts/secret-scan.py .` checks source, build output and data for any of these values.
+
+### Deploying (Vercel)
+Project root directory `apps/web` (npm workspaces install from the repo root, see `apps/web/vercel.json`). Set the env vars above, then point Telegram at the app: `python3 scripts/set-webhook.py https://<your-domain>/api/telegram/webhook`.
+
+---
+Built for the Panta bounty. **Powered by [Panta](https://www.panta.market/).** Verdicts are an independent reading of Panta's public data, not financial advice.

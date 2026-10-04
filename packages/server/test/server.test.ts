@@ -9,7 +9,7 @@ import {
   startBuy, startCreate, verify, verifyAndLink, walletsFor, getDraft, groupMarkets, refIsTrusted, pantaPost, buildClaim, MEMO_PROGRAM,
 } from "../src";
 
-beforeEach(() => { resetDbForTests(":memory:"); calls.length = 0; });
+beforeEach(async () => { await resetDbForTests(":memory:"); calls.length = 0; });
 
 describe("tokens", () => {
   it("round-trips and rejects tampering", () => {
@@ -30,14 +30,14 @@ describe("tokens", () => {
 
 describe("store", () => {
   const base = { marketId: M, wallet: W, side: "yes" as const, amountUsdc: 5, ref: "g-1u2", pantaUserId: "pot:g-1u2", chatId: -1, sharerTgId: 2, sharerX: null, newToPanta: true, pantaStatus: "confirmed", attributed: true, channel: "web" as const };
-  it("records buys once and tracks first-time Pot wallets", () => {
-    expect(recordBuy({ ...base, signature: "s1" })).toEqual({ inserted: true, newToPot: true });
-    expect(recordBuy({ ...base, signature: "s1" }).inserted).toBe(false);
-    expect(recordBuy({ ...base, signature: "s2", newToPanta: false }).newToPot).toBe(false);
-    const b = groupLeaderboard(-1);
+  it("records buys once and tracks first-time Pot wallets", async () => {
+    expect(await recordBuy({ ...base, signature: "s1" })).toEqual({ inserted: true, newToPot: true });
+    expect((await recordBuy({ ...base, signature: "s1" })).inserted).toBe(false);
+    expect((await recordBuy({ ...base, signature: "s2", newToPanta: false })).newToPot).toBe(false);
+    const b = await groupLeaderboard(-1);
     expect(b.totals).toMatchObject({ buys: 2, wallets: 1, newToPot: 1, newToPanta: 1, volumeUsdc: 10 });
     expect(b.members[0]).toMatchObject({ sharer_tg_id: 2, wallets: 1 });
-    expect(globalLeaderboard()[0]).toMatchObject({ source: "group", chat_id: -1 });
+    expect((await globalLeaderboard())[0]).toMatchObject({ source: "group", chat_id: -1 });
   });
 });
 
@@ -73,7 +73,7 @@ describe("buy flow (sandbox fixtures)", () => {
     const f = await finishBuy({ orderId: "ord_sandbox_test", quoteId: "qt_sandbox_test", signature: "sandbox_abcdef123", wallet: W, marketId: M, side: "yes", amountUsdc: 5, ref, rs: signRef(ref), channel: "blink" });
     expect(f).toMatchObject({ status: "confirmed", attributed: true, recorded: true, newToPot: true });
     expect(calls.map((c) => c.path)).toEqual(expect.arrayContaining(["/primaryordersubmit/", "/primaryorderverify/", "/trades/"]));
-    expect(groupLeaderboard(-1009).totals.buys).toBe(1);
+    expect((await groupLeaderboard(-1009)).totals.buys).toBe(1);
     await expect(finishBuy({ orderId: "ord_x", signature: "not a sig", wallet: W, marketId: M, side: "yes", amountUsdc: 5, channel: "web" })).rejects.toThrow(/signature/i);
   });
 });
@@ -81,7 +81,7 @@ describe("buy flow (sandbox fixtures)", () => {
 describe("create flow (sandbox fixtures)", () => {
   it("quotes with an image + group userId, then registers and links to the group", async () => {
     const now = Math.floor(Date.UTC(2026, 9, 3, 12) / 1000);
-    const d = saveDraft(-77, 9, draftMarket("Will Arsenal beat Chelsea on Sunday 4pm?", { now }));
+    const d = await saveDraft(-77, 9, draftMarket("Will Arsenal beat Chelsea on Sunday 4pm?", { now }));
     const s = await startCreate(d.id, W);
     expect(s.createId).toBe("cr_sandbox_test");
     expect(s.transaction.length).toBeGreaterThan(50); // sandbox memo swapped in for the empty tx
@@ -90,8 +90,8 @@ describe("create flow (sandbox fixtures)", () => {
     expect(q.userId).toBe("pot:g-77");
     const f = await finishCreate(d.id, s.createId, "sandbox_create123");
     expect(f.marketId).toBe(M);
-    expect(getDraft(d.id)?.status).toBe("created");
-    expect(groupMarkets(-77)[0]).toMatchObject({ market_id: M, created_by_group: 1, creator_wallet: W });
+    expect((await getDraft(d.id))?.status).toBe("created");
+    expect((await groupMarkets(-77))[0]).toMatchObject({ market_id: M, created_by_group: 1, creator_wallet: W });
     await expect(startCreate(d.id, W)).rejects.toThrow(/already/);
   });
 });
@@ -104,16 +104,16 @@ describe("claims", () => {
 });
 
 describe("wallet link", () => {
-  it("accepts the right signed message and rejects others", () => {
+  it("accepts the right signed message and rejects others", async () => {
     const kp = Keypair.generate();
     const w = kp.publicKey.toBase58();
     const t = sign({ u: 42, a: "link" }, 60);
     const good = bs58.encode(nacl.sign.detached(new TextEncoder().encode(linkMessage(w, t)), kp.secretKey));
-    expect(verifyAndLink(t, w, good)).toEqual({ linked: true, tgUserId: 42 });
-    expect(walletsFor(42)).toContain(w);
+    expect(await verifyAndLink(t, w, good)).toEqual({ linked: true, tgUserId: 42 });
+    expect(await walletsFor(42)).toContain(w);
     const bad = bs58.encode(nacl.sign.detached(new TextEncoder().encode("other"), kp.secretKey));
-    expect(() => verifyAndLink(t, w, bad)).toThrow(/does not match/);
-    expect(() => verifyAndLink(sign({ u: 42, a: "create" }), w, good)).toThrow(/expired/);
+    await expect(verifyAndLink(t, w, bad)).rejects.toThrow(/does not match/);
+    await expect(verifyAndLink(sign({ u: 42, a: "create" }), w, good)).rejects.toThrow(/expired/);
   });
 });
 

@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { runBotTicks } from "@/lib/telegram";
 import { actionHeaders, completedAction, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
 import { DEFAULT_MARKET_IMAGE, finishBuy, getMarketView, SANDBOX } from "@pot/server";
 import { errorResponse, str } from "@/lib/http";
@@ -16,6 +18,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       marketId: id, side: u.searchParams.get("side") === "no" ? "no" : "yes", amountUsdc: Number(u.searchParams.get("amount")),
       ref: u.searchParams.get("ref"), rs: u.searchParams.get("rs"), channel: "blink",
     });
+    if (r.recorded) after(() => runBotTicks({ settle: false }));
     const v = await getMarketView(id).catch(() => null);
     const icon = v?.market.image?.startsWith("https://") ? v.market.image : DEFAULT_MARKET_IMAGE;
     const ok = r.status === "confirmed";

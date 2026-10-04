@@ -91,7 +91,7 @@ export async function finishBuy(input: {
   } catch { /* unknown → not counted */ }
   const chatId = refGroup(parsed);
   const rec = status === "confirmed"
-    ? recordBuy({
+    ? await recordBuy({
         signature, marketId, wallet, side: input.side, amountUsdc: input.amountUsdc, ref, pantaUserId: userId, chatId,
         sharerTgId: parsed.kind === "member" ? parsed.userId : null, sharerX: parsed.kind === "x" ? parsed.handle : null,
         newToPanta, pantaStatus: status, attributed, channel: input.channel,
@@ -103,7 +103,7 @@ export async function finishBuy(input: {
 
 // ---------------------------------------------------------------- create market (admin signs + pays)
 export async function startCreate(draftId: string, wallet: string) {
-  const row = getDraft(draftId);
+  const row = await getDraft(draftId);
   if (!row) throw new FlowError(404, "NO_DRAFT", "Draft not found");
   if (row.status === "created") throw new FlowError(409, "ALREADY_CREATED", "This market was already created");
   if (!isWallet(wallet)) throw bad("BAD_WALLET", "Bad wallet");
@@ -112,7 +112,7 @@ export async function startCreate(draftId: string, wallet: string) {
   const q = await pantaPost<{ createId: string; expectedEventPda: string; paymentUsdc: string }>(
     "/markets/create/quote/", toCreateQuoteBody(row.draft, wallet, DEFAULT_MARKET_IMAGE), { userId: `pot:g${row.chat_id}` });
   const b = await pantaPost<{ transaction: string; recentBlockhash: string; lastValidBlockHeight: number }>("/markets/create/build/", { createId: q.createId, wallet });
-  updateDraft(draftId, { creator_wallet: wallet, status: "building" });
+  await updateDraft(draftId, { creator_wallet: wallet, status: "building" });
   // Sandbox returns an empty transaction; swap in a free devnet memo so the sign → send path still runs.
   let transaction = b.transaction;
   if (SANDBOX && !transaction) transaction = (await compileTx({ payer: wallet, instructions: [], recentBlockhash: b.recentBlockhash ?? "", memo: `pot sandbox create ${q.createId}` })).tx;
@@ -120,13 +120,13 @@ export async function startCreate(draftId: string, wallet: string) {
 }
 
 export async function finishCreate(draftId: string, createId: string, signature: string) {
-  const row = getDraft(draftId);
+  const row = await getDraft(draftId);
   if (!row) throw new FlowError(404, "NO_DRAFT", "Draft not found");
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(createId)) throw bad("BAD_CREATE", "Bad create id");
   if (!(isSignature(signature) || (SANDBOX && isSandboxSignature(signature)))) throw bad("BAD_SIGNATURE", "Bad signature");
   const r = await pantaPost<{ marketId: string; status: string }>("/markets/register/", { createId, signature });
-  updateDraft(draftId, { status: "created", market_id: r.marketId, create_signature: signature });
-  linkGroupMarket(row.chat_id, r.marketId, { createdByGroup: true, draftId, creatorWallet: row.creator_wallet ?? undefined });
+  await updateDraft(draftId, { status: "created", market_id: r.marketId, create_signature: signature });
+  await linkGroupMarket(row.chat_id, r.marketId, { createdByGroup: true, draftId, creatorWallet: row.creator_wallet ?? undefined });
   return { marketId: r.marketId, chatId: row.chat_id, sandbox: SANDBOX };
 }
 

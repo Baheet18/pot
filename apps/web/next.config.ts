@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   turbopack: { root },
   outputFileTracingRoot: root,
   serverExternalPackages: ["better-sqlite3"],
-  transpilePackages: ["@pot/core", "@pot/server", "@solana/wallet-adapter-base", "@solana/wallet-adapter-react", "@solana/wallet-adapter-react-ui", "@solana/wallet-adapter-phantom"],
+  transpilePackages: ["@pot/core", "@pot/server", "@pot/bot", "@solana/wallet-adapter-base", "@solana/wallet-adapter-react", "@solana/wallet-adapter-react-ui", "@solana/wallet-adapter-phantom"],
   images: { remotePatterns: [{ protocol: "https", hostname: "res.cloudinary.com" }] },
   async headers() {
     return [{ source: "/actions.json", headers: [{ key: "Access-Control-Allow-Origin", value: "*" }] }];
