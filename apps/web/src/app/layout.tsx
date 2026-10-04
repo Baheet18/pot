@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main className="mx-auto max-w-5xl px-4 pb-16">{children}</main>
         <footer className="mx-auto max-w-5xl px-4 pb-8 text-xs text-stone-500">
-          Verdicts are an independent reading of Panta&apos;s public data, not advice. Payouts are estimates from the pool and change as people buy. <PoweredByPanta className="ml-2" />
+          Not financial advice. Payouts are estimates from the pool and change as people buy; Panta sets the final numbers. <PoweredByPanta className="ml-2" />
         </footer>
       </body>
     </html>

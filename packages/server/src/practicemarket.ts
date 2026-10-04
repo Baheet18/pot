@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import bs58 from "bs58";
-import { VERDICT_CONFIG, type MarketDraft, type RawDetail, type RawTrade } from "@pot/core";
-import { buysForWallets, getDraft, getPracticeMarket, insertPracticeMarket, linkGroupMarket, listPracticeMarkets, practiceTrades, updateDraft, type PracticeMarketRow, type PracticeTradeRow } from "./store";
+import { MARKET_CONFIG, type MarketDraft, type RawDetail, type RawTrade } from "@pot/core";
+import { buysForWallets, getDraft, getPracticeMarket, getPracticeResult, insertPracticeResult, type PracticeResultRow, insertPracticeMarket, linkGroupMarket, listPracticeMarkets, practiceTrades, updateDraft, type PracticeMarketRow, type PracticeTradeRow } from "./store";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
 
 /**
@@ -10,12 +10,12 @@ import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
  * Blinks and /mine show the group's real question, rule, sources and times. Nothing here touches Panta or any chain.
  *
  * Pool model (simple and transparent): the market opens with Panta-style seed money on both sides
- * (VERDICT_CONFIG.creatorSeedUsdcPerSide each, from the seeding wallet). The YES price is YES money ÷ all money;
+ * (MARKET_CONFIG.creatorSeedUsdcPerSide each, from the seeding wallet). The YES price is YES money ÷ all money;
  * a buy of $A on a side gets A ÷ (that side's price just before the buy) shares, fixed when the buy is recorded.
  * Payouts split the pool after royalty.
  */
-export const PRACTICE_SEED_WALLET = VERDICT_CONFIG.seedingWallets[0];
-const SEED = VERDICT_CONFIG.creatorSeedUsdcPerSide;
+export const PRACTICE_SEED_WALLET = MARKET_CONFIG.seedingWallets[0];
+const SEED = MARKET_CONFIG.creatorSeedUsdcPerSide;
 const clamp = (p: number) => Math.min(0.98, Math.max(0.02, p));
 
 export const newPracticeMarketId = () => bs58.encode(randomBytes(32));
@@ -48,12 +48,13 @@ export function quotePractice(st: PoolState, side: "yes" | "no", amount: number)
   return { price, shares: amount / price };
 }
 
-/** A Panta-shaped detail row for a practice market, so the normal normalise/verdict/payout code works unchanged. */
-export function practiceDetail(row: PracticeMarketRow, st: PoolState, now: number): RawDetail {
+/** A Panta-shaped detail row for a practice market, so the normal normalise/payout code works unchanged. */
+export function practiceDetail(row: PracticeMarketRow, st: PoolState, now: number, result: PracticeResultRow | null = null): RawDetail {
   const d: MarketDraft = row.draft;
   const total = st.yesMoney + st.noMoney;
   const yesPrice = st.yesMoney / total;
-  const phase = now < d.startTime ? "primary" : "secondary";
+  const phase = result ? "resolved" : now < d.startTime ? "primary" : "secondary";
+  const res = result ? { resolved: true, isResolved: true, yesWins: result.outcome === "yes", resolvedAt: result.settled_at } : {};
   const b6 = (x: number) => String(Math.round(x * 1e6));
   return {
     marketId: row.id,
@@ -68,7 +69,8 @@ export function practiceDetail(row: PracticeMarketRow, st: PoolState, now: numbe
     endTime: d.endTime,
     resolutionTime: d.resolutionTime,
     primaryPhaseEndTime: d.startTime,
-    resolved: false,
+    resolved: !!result,
+    ...res,
     volumeUsdc: total.toFixed(2),
     totalVolumeUsdc: total.toFixed(2),
     yesPrice: yesPrice.toFixed(4),
@@ -83,7 +85,8 @@ export function practiceDetail(row: PracticeMarketRow, st: PoolState, now: numbe
       totalYesVolume: b6(st.yesMoney), totalNoVolume: b6(st.noMoney), totalVolume: b6(total),
       totalYesShares: b6(st.yesShares), totalNoShares: b6(st.noShares),
       totalTrades: String(st.trades.length), lastYesPrice: String(Math.round(yesPrice * 1e9)),
-      primaryPhaseEndTime: d.startTime, isResolved: false, isCancelled: false, isGraduated: false,
+      primaryPhaseEndTime: d.startTime, isResolved: !!result, isCancelled: false, isGraduated: false,
+      ...(result ? { yesWins: result.outcome === "yes", resolvedAt: result.settled_at } : {}),
     },
   };
 }
@@ -91,7 +94,8 @@ export function practiceDetail(row: PracticeMarketRow, st: PoolState, now: numbe
 export async function practiceState(id: string) {
   const row = await getPracticeMarket(id);
   if (!row) return null;
-  return { row, pool: replayPool(await practiceTrades(id), row.created_at) };
+  const [trades, result] = await Promise.all([practiceTrades(id), getPracticeResult(id)]);
+  return { row, pool: replayPool(trades, row.created_at), result };
 }
 
 /** Turns an approved, practice-signed draft into a practice market linked to its group. */
@@ -111,7 +115,7 @@ export { listPracticeMarkets };
 /** Test-mode positions for /mine: practice buys grouped by market and side, with the market's title and status. */
 export async function practicePositions(wallets: string[]) {
   const mine = await buysForWallets(wallets);
-  const out: Array<{ marketId: string; title: string; side: "yes" | "no"; amountUsdc: number; shares: number; paysIfWin: number; closes: number; open: boolean; wallet: string }> = [];
+  const out: Array<{ marketId: string; title: string; side: "yes" | "no"; amountUsdc: number; shares: number; paysIfWin: number; closes: number; open: boolean; wallet: string; result: "yes" | "no" | null; payout: number }> = [];
   const now = Math.floor(Date.now() / 1000);
   for (const id of [...new Set(mine.map((b) => b.market_id))]) {
     const st = await practiceState(id);
@@ -127,9 +131,23 @@ export async function practicePositions(wallets: string[]) {
         marketId: id, title: st.row.draft.question, side, wallet: rows[0].wallet,
         amountUsdc: rows.reduce((a, b) => a + Number(b.amount_usdc), 0),
         shares, paysIfWin: per ? shares * per : 0,
-        closes: st.row.draft.startTime, open: now < st.row.draft.startTime,
+        closes: st.row.draft.startTime, open: !st.result && now < st.row.draft.startTime,
+        result: st.result?.outcome ?? null, payout: st.result ? (st.result.outcome === side && per ? shares * per : 0) : 0,
       });
     }
   }
   return out;
+}
+
+/**
+ * Practice mode only: the group's admin declares the result (there is no oracle for practice markets).
+ * Idempotent: the first result wins; later calls return the stored one with `already: true`.
+ */
+export async function settlePracticeMarket(id: string, outcome: "yes" | "no", settledBy: number | null) {
+  if (!SANDBOX) throw new Error("Only practice markets can be settled by hand.");
+  const row = await getPracticeMarket(id);
+  if (!row) throw new Error("That practice market doesn't exist.");
+  const inserted = await insertPracticeResult(id, outcome, settledBy);
+  const result = (await getPracticeResult(id))!;
+  return { already: !inserted, outcome: result.outcome, chatId: row.chat_id };
 }

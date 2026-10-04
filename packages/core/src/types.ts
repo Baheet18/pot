@@ -79,7 +79,7 @@ export interface RawTrade {
   signature: string;
 }
 
-/** Normalized market used by the verdict engine and UI. All money in USDC (human units). */
+/** Normalized market used by the UI. All money in USDC (human units). */
 export interface MarketData {
   id: string;
   title: string;
@@ -148,33 +148,13 @@ export interface TradeSummary {
   topRealWalletShare: number | null;
 }
 
-export type VerdictKind = "Thin" | "Crowded" | "Overconfident" | "Ordinary";
-
-export interface VerdictNumbers {
+/** Plain market numbers shown on cards and pages. */
+export interface MarketStats {
+  /** YES share of the money (0..1), real-wallet money when the trade tape is complete. */
+  yesSplit: number | null;
   realWallets: number;
   realWalletsYes: number;
   realWalletsNo: number;
-  organicVolumeUsdc: number;
-  /** YES share of the money used for the split (0..1). */
-  yesSplit: number | null;
-  splitBasis: "real-money" | "all-money" | "none";
-  leadingSide: "YES" | "NO" | null;
-  leadingShare: number | null;
-  ageHours: number | null;
-  priceBuyOnly: boolean;
-  yesPrice: number | null;
-  tapeComplete: boolean;
-  tapeRows: number;
-  totalTrades: number;
-}
-
-export interface Verdict {
-  kind: VerdictKind;
-  line: string;
-  /** Which rule(s) fired, for transparency. */
-  reasons: string[];
-  numbers: VerdictNumbers;
-  dataNotes: string[];
 }
 
 export interface PayoutEstimate {

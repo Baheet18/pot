@@ -46,7 +46,7 @@ function Inner(p: BuyPanelProps) {
     setStep("finishing"); setSig("signature" in proof ? proof.signature : "practice (free message signature)");
     const f = await api<Finish>("/api/pot/buy/finish", { orderId: q.orderId, quoteId: q.quoteId, ...proof, wallet: publicKey.toBase58(), marketId: p.marketId, side: q.side, amountUsdc: q.amountUsdc, ref: p.refStr, rs: p.rs, channel: "web" });
     setRes(f); setStep(f.status === "confirmed" ? "done" : "error");
-    if (f.status === "confirmed") router.refresh(); // show the updated pot, split and verdict
+    if (f.status === "confirmed") router.refresh(); // show the updated pot and split
     if (f.status !== "confirmed") setMsg(`Panta reports the order as ${f.status}.`);
   }
 

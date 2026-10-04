@@ -67,18 +67,60 @@ describe("Pot bot", () => {
     expect(verify<{ d: string }>(new URL(url).searchParams.get("t"))?.d).toBe(draftId);
   });
 
+  it("/new refuses personal bets politely, with a suggestion", async () => {
+    const b = makeBot([7], async () => ({ kind: "refuse", message: "😅 I can't make a market on that one.", suggestion: "Try: /new Will Super Eagles beat Ghana on Saturday?" }));
+    await b.msg("/new will Tolu pay me back");
+    expect(b.replies()[0].text).toBe("😅 I can't make a market on that one.\n\n💡 Try: /new Will Super Eagles beat Ghana on Saturday?");
+    expect(b.replies()[0].reply_markup).toBeUndefined();
+  });
+
+  it("/new on a multi-outcome question offers YES/NO markets to pick; a tap drafts that one (drafting admin only)", async () => {
+    const asked: string[] = [];
+    const drafter: Drafter = async (text) => {
+      asked.push(text);
+      if (/who wins/i.test(text)) return { kind: "multi", question: "who wins BBNaija?", rephrase: "Will a female housemate win BBNaija Season 10?", options: [
+        { label: "Kellyrae", question: "Will Kellyrae win BBNaija Season 10?" }, { label: "Wanni", question: "Will Wanni win BBNaija Season 10?" }] };
+      return { kind: "draft", draft: draftMarket("Will Super Eagles beat Ghana on Saturday 8pm?", { now: Math.floor(Date.now() / 1000) }) };
+    };
+    const b = makeBot([7], drafter);
+    await b.msg("/new who wins BBNaija?");
+    const r = b.replies()[0];
+    expect(r.text).toContain("YES/NO only");
+    expect(r.text).toContain("Will Kellyrae win BBNaija Season 10?");
+    const btns = r.reply_markup.inline_keyboard.flat();
+    expect(btns.map((x: any) => x.text)).toEqual(["➕ Kellyrae", "➕ Wanni", "✍️ Rephrase as one YES/NO"]);
+    const wanni = btns[1].callback_data as string;
+    expect(wanni).toMatch(/^opt:c_[\w-]+:1$/);
+
+    await b.tap(wanni, MEMBER);
+    expect(b.sent.filter((x) => x.method === "answerCallbackQuery").at(-1)!.payload.text).toMatch(/Only the admin/);
+    expect(asked).toHaveLength(1);
+
+    await b.tap(wanni);
+    expect(asked.at(-1)).toBe("Will Wanni win BBNaija Season 10?");
+    const marked = b.sent.filter((x) => x.method === "editMessageReplyMarkup").at(-1)!.payload.reply_markup.inline_keyboard.flat().map((x: any) => x.text);
+    expect(marked).toContain("✅ Wanni");
+    const preview = b.replies().at(-1);
+    expect(preview.text).toContain("Market draft");
+    expect(preview.reply_markup.inline_keyboard.flat().some((x: any) => x.text.startsWith("✅ Create"))).toBe(true);
+
+    await b.tap(btns[2].callback_data);
+    expect(asked.at(-1)).toBe("Will a female housemate win BBNaija Season 10?");
+  });
+
   it("non-admins can't /new in a group", async () => {
     const b = makeBot();
     await b.msg("/new Will it rain in Lagos tomorrow?", MEMBER);
     expect(b.replies()[0].text).toMatch(/Only group admins/);
   });
 
-  it("/markets shows the group's market as a card with verdict and signed group ref buttons", async () => {
+  it("/markets shows the group's market as a simple card (no verdict) with signed group ref buttons", async () => {
     const b = makeBot();
     await linkGroupMarket(GROUP.id, M, { createdByGroup: true });
     await b.msg("/markets", MEMBER);
     const r = b.replies()[0];
-    expect(r.text).toMatch(/Thin|Ordinary|Crowded|Overconfident/);
+    expect(r.text).not.toMatch(/Thin|Ordinary|Crowded|Overconfident/);
+    expect(r.text).toMatch(/Pot \$/);
     expect(r.text).toContain("Powered by Panta");
     const urls = r.reply_markup.inline_keyboard.flat().map((x: any) => x.url).filter(Boolean);
     const buy = new URL(urls.find((u: string) => u.includes("side=yes")));

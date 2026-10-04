@@ -16,12 +16,12 @@ export async function actionGetFor(id: string, refRaw: string | null, rsRaw: str
   const v = await getMarketView(id);
   const { ref } = resolveRef(refRaw, rsRaw);
   const payload = marketActionGet({
-    marketId: id, title: v.market.title, icon: actionIcon(v), verdictLine: `${v.verdict.kind}: ${v.verdict.line}`,
-    yesPct: v.verdict.numbers.yesSplit, paysYes: v.payout.perYesShare, paysNo: v.payout.perNoShare,
+    marketId: id, title: v.market.title, icon: actionIcon(v),
+    yesPct: v.stats.yesSplit, paysYes: v.payout.perYesShare, paysNo: v.payout.perNoShare,
     buyable: v.buyable, ref, rs: ref.startsWith("g") ? signRef(ref) : null, sandbox: SANDBOX,
   });
   return { payload, view: v, ref };
 }
 
 export const shareTextFor = (v: MarketView) =>
-  shareText({ title: v.market.title, yesPct: v.verdict.numbers.yesSplit, verdict: v.verdict.kind, practice: v.practice || v.sandbox });
+  shareText({ title: v.market.title, yesPct: v.stats.yesSplit, practice: v.practice || v.sandbox });

@@ -1,4 +1,4 @@
-import { VERDICT_CONFIG } from "./config";
+import { MARKET_CONFIG } from "./config";
 import type { MarketData, RawDetail, RawTrade, TradeSummary } from "./types";
 
 const num = (v: unknown): number | null => {
@@ -18,7 +18,7 @@ export function summarizeTrades(
   trades: RawTrade[],
   opts: { totalTrades: number; lastYesPrice: number | null; seedingWallets?: readonly string[] },
 ): TradeSummary {
-  const seeding = new Set(opts.seedingWallets ?? VERDICT_CONFIG.seedingWallets);
+  const seeding = new Set(opts.seedingWallets ?? MARKET_CONFIG.seedingWallets);
   const yesPx = opts.lastYesPrice ?? 0.5;
   const est = (t: RawTrade) => {
     const amt = num(t.amountUsdc);

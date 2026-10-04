@@ -181,7 +181,7 @@ export async function finishBuyPractice(input: Omit<Parameters<typeof finishBuy>
   const detail = input.practiceMessage.split("\n").find((l) => l.startsWith("Detail: "))?.slice(8);
   if (detail !== `${input.side.toUpperCase()} $${amount.toFixed(2)}`) throw bad("BAD_PRACTICE", "The practice message doesn't match this order.");
   if (!(amount >= 1 && amount <= 500)) throw bad("BAD_AMOUNT", "Amount must be between $1 and $500");
-  if (Math.floor(Date.now() / 1000) >= st.row.draft.startTime) throw new FlowError(409, "NOT_BUYABLE", "Buying has closed on this market.");
+  if (st.result || Math.floor(Date.now() / 1000) >= st.row.draft.startTime) throw new FlowError(409, "NOT_BUYABLE", "Buying has closed on this market.");
   const { ref, parsed, userId } = resolveRef(input.ref, input.rs);
   const rec = await recordBuy({
     signature, marketId: input.marketId, wallet: input.wallet, side: input.side, amountUsdc: amount, ref, pantaUserId: userId, chatId: refGroup(parsed),

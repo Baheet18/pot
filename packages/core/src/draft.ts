@@ -36,6 +36,12 @@ export interface MarketDraft {
   drafter?: "ai" | "rules";
   /** Problems that block creation (e.g. disallowed content, already decided). */
   blockers?: string[];
+  /** "event": a match/show/announcement with a scheduled start, so buying must close at that start (kick-off). */
+  timing?: "event" | "deadline";
+  /** Unix seconds: the event's scheduled start (kick-off), when timing is "event". */
+  eventStartTime?: number;
+  /** False when the start time was assumed rather than given (the bot then asks for it). */
+  eventStartKnown?: boolean;
 }
 
 export interface DraftOptions {
@@ -440,8 +446,10 @@ export function draftMarket(input: string, opts: DraftOptions = {}): MarketDraft
   }
   if (rule.length > LIMITS.rule) rule = rule.slice(0, LIMITS.rule);
 
+  const isEvent = kind === "match" || kind === "scorer" || kind === "reality";
   return {
     kind,
+    ...(isEvent ? { timing: "event" as const, eventStartTime: eventUnix, eventStartKnown: hadTime && (useDl || ch.unix !== null) } : { timing: "deadline" as const }),
     question,
     title: title.slice(0, 120),
     description: `Created from a group chat with Pot. ${rule}`.slice(0, 1000),
@@ -474,6 +482,11 @@ export function validateDraft(d: MarketDraft, now = Math.floor(Date.now() / 1000
   if (d.marketType === "standard" && d.startTime - now < LIMITS.breakingWindowSec - 3600) errs.push("standard markets must start more than ~72h from now (use breaking)");
   if (d.creationFeeUsdc !== LIMITS.fees[d.marketType]) errs.push("fee doesn't match the market type");
   if (d.sourcesOfTruth.some((u) => !/^https:\/\/[^\s/$.?#].[^\s]*$/i.test(u))) errs.push("sources must be https links");
+  if (d.timing === "event") {
+    // Matches and shows: nobody may buy once the event has started.
+    if (!d.eventStartTime) errs.push("the event's start time (kick-off) is unknown: add it with /edit kickoff <time>");
+    else if (!d.eventInProgress && d.startTime > d.eventStartTime) errs.push(`buying must close at kick-off (${fmtWat(d.eventStartTime)}), not after it`);
+  }
   for (const b of d.blockers ?? []) errs.push(b);
   return errs;
 }

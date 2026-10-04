@@ -44,7 +44,6 @@ export function marketActionGet(opts: {
   marketId: string;
   title: string;
   icon: string;
-  verdictLine: string;
   yesPct: number | null;
   paysYes: number | null;
   paysNo: number | null;
@@ -58,8 +57,7 @@ export function marketActionGet(opts: {
   const pay = (x: number | null) => (x === null ? "—" : `$${x.toFixed(2)}`);
   const desc = [
     opts.sandbox ? "🧪 Practice market: no real money. You sign a free message, not a transaction." : null,
-    opts.verdictLine,
-    opts.yesPct !== null ? `Money split: ${Math.round(opts.yesPct * 100)}% YES.` : null,
+    opts.yesPct !== null ? `Money split: ${Math.round(opts.yesPct * 100)}% YES / ${100 - Math.round(opts.yesPct * 100)}% NO.` : "No buys yet.",
     opts.paysYes !== null || opts.paysNo !== null ? `Pays about ${pay(opts.paysYes)}/share if YES is right, ${pay(opts.paysNo)} if NO (estimate).` : null,
     "Powered by Panta.",
   ]
@@ -102,9 +100,9 @@ export function xIntentUrl(text: string, url: string) {
 }
 
 /** Short prefilled post text for sharing a market on X (kept well under X's limit; the URL is added by X). */
-export function shareText(opts: { title: string; yesPct: number | null; verdict: string; practice: boolean }) {
+export function shareText(opts: { title: string; yesPct: number | null; practice: boolean }) {
   const title = opts.title.length > 150 ? opts.title.slice(0, 147).replace(/\s+\S*$/, "") + "…" : opts.title;
-  const split = opts.yesPct === null ? "" : ` Right now ${Math.round(opts.yesPct * 100)}% of the money says YES (${opts.verdict}).`;
+  const split = opts.yesPct === null ? "" : ` Right now ${Math.round(opts.yesPct * 100)}% of the money says YES.`;
   return `${title}${split} Pick a side on Pot${opts.practice ? " (practice market, no real money)" : ""}:`;
 }
 

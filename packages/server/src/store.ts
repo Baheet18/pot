@@ -31,6 +31,12 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS practice_trades (
     signature TEXT NOT NULL, mode TEXT NOT NULL, market_id TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT NOT NULL, amount_usdc DOUBLE PRECISION NOT NULL,
     shares DOUBLE PRECISION NOT NULL, created_ms BIGINT NOT NULL, PRIMARY KEY (signature, mode))`,
+  `CREATE TABLE IF NOT EXISTS practice_results (
+    id TEXT NOT NULL, mode TEXT NOT NULL, outcome TEXT NOT NULL, settled_by BIGINT, settled_at BIGINT NOT NULL, PRIMARY KEY (id, mode))`,
+  `CREATE TABLE IF NOT EXISTS draft_choices (
+    id TEXT PRIMARY KEY, mode TEXT NOT NULL, chat_id BIGINT NOT NULL, admin_id BIGINT NOT NULL, payload_json TEXT NOT NULL, created_at BIGINT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS receipts (
+    market_id TEXT NOT NULL, chat_id BIGINT NOT NULL, mode TEXT NOT NULL, message_id BIGINT, created_at BIGINT NOT NULL, PRIMARY KEY (market_id, chat_id, mode))`,
   `CREATE TABLE IF NOT EXISTS practice_markets (
     id TEXT PRIMARY KEY, mode TEXT NOT NULL, chat_id BIGINT NOT NULL, draft_id TEXT NOT NULL, creator_wallet TEXT NOT NULL,
     draft_json TEXT NOT NULL, created_at BIGINT NOT NULL)`,
@@ -209,6 +215,11 @@ export async function getPracticeMarket(id: string): Promise<PracticeMarketRow |
 export async function listPracticeMarkets(limit = 50): Promise<PracticeMarketRow[]> {
   return (await all<Record<string, unknown>>(`SELECT * FROM practice_markets WHERE mode=? ORDER BY created_at DESC LIMIT ?`, [MODE, limit])).map((r) => toPractice(r)!);
 }
+/** A group's own practice markets, newest first, with their result (if settled). */
+export async function practiceMarketsForChat(chatId: number): Promise<Array<PracticeMarketRow & { outcome: "yes" | "no" | null }>> {
+  return (await all<Record<string, unknown>>(`SELECT p.*, r.outcome FROM practice_markets p LEFT JOIN practice_results r ON r.id=p.id AND r.mode=p.mode
+    WHERE p.chat_id=? AND p.mode=? ORDER BY p.created_at DESC`, [chatId, MODE])).map((r) => ({ ...toPractice(r)!, outcome: (r.outcome as "yes" | "no" | null) ?? null }));
+}
 export interface PracticeTradeRow { signature: string; market_id: string; wallet: string; side: "yes" | "no"; amount_usdc: number; shares: number; created_ms: number }
 /** Practice-pool fills, with the shares fixed at the moment of the buy (so the pool never depends on row order). */
 export async function insertPracticeTrade(t: { signature: string; marketId: string; wallet: string; side: "yes" | "no"; amountUsdc: number; shares: number }) {
@@ -230,7 +241,7 @@ export async function buysForWallets(wallets: string[]): Promise<BuyRow[]> {
 /** Test-mode reset: removes every row for MODE='test' (never touches live rows). Returns rows deleted per table. */
 /** Real Telegram user ids are large; ids below this are fixtures from scripts/tests. */
 const FAKE_TG_ID_MAX = 100000;
-const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades"] as const;
+const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades", "practice_results", "receipts", "draft_choices"] as const;
 /** Counts of test-mode rows (what wipeTestData would remove). */
 export async function testDataSummary(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -289,4 +300,58 @@ export async function topPeople(limit = 20, chatId?: number): Promise<PersonRank
 export async function walletOwnerName(wallet: string): Promise<string | null> {
   const r = await one<{ name: string | null }>(`SELECT m.name FROM wallet_links l JOIN members m ON m.tg_user_id=l.tg_user_id WHERE l.mode=? AND l.wallet=? LIMIT 1`, [MODE, wallet]);
   return r?.name ?? null;
+}
+
+// ---------------------------------------------------------------- settlement: practice results and one-receipt-per-market-per-group
+export interface PracticeResultRow { id: string; outcome: "yes" | "no"; settled_by: number | null; settled_at: number }
+/** Records a practice market's result once. Returns false if it was already settled. */
+export async function insertPracticeResult(id: string, outcome: "yes" | "no", settledBy: number | null): Promise<boolean> {
+  return (await run(`INSERT INTO practice_results (id, mode, outcome, settled_by, settled_at) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING`, [id, MODE, outcome, settledBy, now()])).changes > 0;
+}
+export async function getPracticeResult(id: string): Promise<PracticeResultRow | null> {
+  const r = await one<PracticeResultRow>(`SELECT id, outcome, settled_by, settled_at FROM practice_results WHERE id=? AND mode=?`, [id, MODE]);
+  return r ? { ...r, settled_at: Number(r.settled_at), settled_by: r.settled_by === null ? null : Number(r.settled_by) } : null;
+}
+/** Atomically claims the right to post the receipt for (market, group). Only the first caller gets true. */
+export async function claimReceipt(marketId: string, chatId: number): Promise<boolean> {
+  return (await run(`INSERT INTO receipts (market_id, chat_id, mode, created_at) VALUES (?,?,?,?) ON CONFLICT DO NOTHING`, [marketId, chatId, MODE, now()])).changes > 0;
+}
+export async function setReceiptMessage(marketId: string, chatId: number, messageId: number) {
+  await run(`UPDATE receipts SET message_id=? WHERE market_id=? AND chat_id=? AND mode=?`, [messageId, marketId, chatId, MODE]);
+}
+/** Gives the claim back when posting failed, so a later tick can retry. */
+export async function releaseReceipt(marketId: string, chatId: number) {
+  await run(`DELETE FROM receipts WHERE market_id=? AND chat_id=? AND mode=? AND message_id IS NULL`, [marketId, chatId, MODE]);
+}
+export async function receiptFor(marketId: string, chatId: number): Promise<{ message_id: number | null } | null> {
+  return (await one<{ message_id: number | null }>(`SELECT message_id FROM receipts WHERE market_id=? AND chat_id=? AND mode=?`, [marketId, chatId, MODE])) ?? null;
+}
+export async function groupsForMarket(marketId: string): Promise<GroupMarketRow[]> {
+  return all<GroupMarketRow>(`SELECT * FROM group_markets WHERE market_id=? AND mode=?`, [marketId, MODE]);
+}
+/** Telegram names for many wallets at once (wallet → name). */
+export async function walletOwnerNames(wallets: string[]): Promise<Map<string, string>> {
+  if (!wallets.length) return new Map();
+  const rows = await all<{ wallet: string; name: string }>(`SELECT l.wallet, m.name FROM wallet_links l JOIN members m ON m.tg_user_id=l.tg_user_id
+    WHERE l.mode=? AND l.wallet IN (${wallets.map(() => "?").join(",")})`, [MODE, ...wallets]);
+  return new Map(rows.map((r) => [r.wallet, r.name]));
+}
+
+// ---------------------------------------------------------------- multi-outcome choices ("who wins X?" → pick YES/NO markets)
+export interface ChoiceOption { label: string; question: string; used?: boolean }
+export interface DraftChoice { id: string; chat_id: number; admin_id: number; question: string; options: ChoiceOption[]; rephrase: string | null; created_at: number }
+export async function saveChoice(chatId: number, adminId: number, c: { question: string; options: ChoiceOption[]; rephrase: string | null }): Promise<DraftChoice> {
+  const id = newId("c");
+  const created = now();
+  await run(`INSERT INTO draft_choices (id, mode, chat_id, admin_id, payload_json, created_at) VALUES (?,?,?,?,?,?)`, [id, MODE, chatId, adminId, JSON.stringify(c), created]);
+  return { id, chat_id: chatId, admin_id: adminId, ...c, created_at: created };
+}
+export async function getChoice(id: string): Promise<DraftChoice | null> {
+  const r = await one<{ id: string; chat_id: number; admin_id: number; payload_json: string; created_at: number }>(`SELECT * FROM draft_choices WHERE id=? AND mode=?`, [id, MODE]);
+  if (!r) return null;
+  const p = JSON.parse(r.payload_json) as { question: string; options: ChoiceOption[]; rephrase: string | null };
+  return { id: r.id, chat_id: Number(r.chat_id), admin_id: Number(r.admin_id), ...p, created_at: Number(r.created_at) };
+}
+export async function updateChoice(c: DraftChoice) {
+  await run(`UPDATE draft_choices SET payload_json=? WHERE id=? AND mode=?`, [JSON.stringify({ question: c.question, options: c.options, rephrase: c.rephrase }), c.id, MODE]);
 }

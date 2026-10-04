@@ -2,7 +2,6 @@ import Link from "next/link";
 import { listOpenViews, topGroups, totals } from "@pot/server";
 import { fmtUsd } from "@pot/core";
 import { MarketCard } from "@/components/MarketCard";
-import { VERDICT_STYLE } from "@/components/VerdictBadge";
 import { EmptyBuys } from "@/components/EmptyBuys";
 import { SANDBOX } from "@/lib/ui";
 
@@ -42,10 +41,12 @@ export default async function Home() {
 
       <section className="grid gap-6 md:grid-cols-2">
         <div className="card p-5">
-          <h2 className="mb-3 text-lg font-bold">What the verdict means</h2>
-          <ul className="space-y-2 text-sm">
-            {Object.entries(VERDICT_STYLE).map(([k, s]) => <li key={k}><b>{s.emoji} {k}:</b> <span className="text-stone-300">{s.blurb}</span></li>)}
-          </ul>
+          <h2 className="mb-3 text-lg font-bold">How it works</h2>
+          <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-300">
+            <li>An admin types <code className="rounded bg-white/10 px-1">/new</code> with a YES/NO question. Pot drafts a fair rule, sources, and closes buying at kick-off.</li>
+            <li>Members pick YES or NO. Everyone&apos;s money goes into one pot.</li>
+            <li>When it resolves, Pot posts a receipt in the group: the result, the final pot, and who won or lost how much.</li>
+          </ol>
         </div>
         <div className="card p-5">
           <h2 className="mb-3 text-lg font-bold">Top groups</h2>

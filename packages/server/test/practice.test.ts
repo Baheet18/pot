@@ -62,11 +62,11 @@ describe("practice markets (test mode)", () => {
     expect((await listOpenViews(10)).map((x) => x.market.id)).toContain(id);
   });
 
-  it("practice buys move the pool, split, wallets and verdict; nothing goes to Panta", async () => {
+  it("practice buys move the pool, split and wallets; nothing goes to Panta", async () => {
     const id = await createPractice();
     const before = await getMarketView(id);
     expect(before.market.totalVolumeUsdc).toBeCloseTo(5, 5); // seed only
-    expect(before.verdict.numbers.realWallets).toBe(0);
+    expect(before.stats.realWallets).toBe(0);
     const buyers = Array.from({ length: 8 }, () => Keypair.generate());
     for (const [i, kp] of buyers.entries()) {
       const r = await practiceBuy(id, kp, i % 3 === 2 ? "no" : "yes", 15);
@@ -74,11 +74,11 @@ describe("practice markets (test mode)", () => {
     }
     const after = await getMarketView(id);
     expect(after.market.totalVolumeUsdc).toBeCloseTo(125, 5);
-    expect(after.verdict.numbers.realWallets).toBe(8);
-    expect(after.verdict.numbers.realWalletsYes).toBe(6);
-    expect(after.verdict.numbers.yesSplit!).toBeGreaterThan(0.6);
-    expect(before.verdict.kind).toBe("Thin");
-    expect(after.verdict.kind).toBe("Ordinary");
+    expect(after.stats.realWallets).toBe(8);
+    expect(after.stats.realWalletsYes).toBe(6);
+    expect(after.stats.yesSplit!).toBeGreaterThan(0.6);
+    expect(before.stats.yesSplit).toBeNull();
+    expect(Object.keys(after)).not.toContain("verdict");
     expect(after.payout.perYesShare).not.toBeNull();
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
     const pos = await practicePositions([buyers[0].publicKey.toBase58()]);

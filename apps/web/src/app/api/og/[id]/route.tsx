@@ -3,7 +3,6 @@ import { fmtTime, fmtUsd } from "@pot/core";
 import { getMarketView, type MarketView } from "@pot/server";
 
 /** Open Graph / X card image (1200×630) and square Blink icon (?sq=1, 800×800) for a market. No emoji (no network fonts). */
-const VERDICT_COLOR: Record<string, string> = { Thin: "#a8a29e", Overconfident: "#fb7185", Crowded: "#fbbf24", Ordinary: "#34d399" };
 const HEADERS = { "cache-control": "public, max-age=120, s-maxage=120, stale-while-revalidate=600" };
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -26,9 +25,9 @@ function Fallback() {
 
 function MarketImage({ v, sq }: { v: MarketView; sq: boolean }) {
   const m = v.market;
-  const ys = v.verdict.numbers.yesSplit;
+  const ys = v.stats.yesSplit;
   const y = ys === null ? 50 : Math.round(ys * 100);
-  const color = VERDICT_COLOR[v.verdict.kind] ?? "#a8a29e";
+  const people = v.stats.realWallets;
   const title = m.title.length > 110 ? m.title.slice(0, 107).replace(/\s+\S*$/, "") + "…" : m.title;
   const closes = m.primaryPhaseEndTime ?? m.startTime;
   const pad = sq ? 56 : 64;
@@ -44,8 +43,8 @@ function MarketImage({ v, sq }: { v: MarketView; sq: boolean }) {
       <div style={{ display: "flex", marginTop: sq ? 44 : 36, fontSize: sq ? 52 : 54, fontWeight: 900, lineHeight: 1.15 }}>{title}</div>
       <div style={{ display: "flex", flexGrow: 1 }} />
       <div style={{ display: "flex", alignItems: "center", marginBottom: 22 }}>
-        <div style={{ display: "flex", padding: "6px 18px", borderRadius: 12, border: `3px solid ${color}`, color, fontSize: 30, fontWeight: 800 }}>{v.verdict.kind}</div>
-        <div style={{ display: "flex", marginLeft: 20, fontSize: 26, color: "#d6d3d1" }}>{`Pot ${fmtUsd(m.totalVolumeUsdc)} · ${v.verdict.numbers.realWallets} real wallet${v.verdict.numbers.realWallets === 1 ? "" : "s"}`}</div>
+        {m.isResolved ? <div style={{ display: "flex", padding: "6px 18px", borderRadius: 12, background: "#fbbf24", color: "#0c0a09", fontSize: 30, fontWeight: 900, marginRight: 20 }}>{`RESULT: ${m.yesWins ? "YES" : "NO"}`}</div> : null}
+        <div style={{ display: "flex", fontSize: 30, fontWeight: 700, color: "#e7e5e4" }}>{`${m.isResolved ? "Final pot" : "Pot"} ${fmtUsd(m.totalVolumeUsdc)} · ${people} ${people === 1 ? "person" : "people"}`}</div>
       </div>
       <div style={{ display: "flex", width: "100%", height: 30, borderRadius: 999, overflow: "hidden", background: "#292524" }}>
         <div style={{ display: "flex", width: `${y}%`, background: "#34d399" }} />
@@ -56,7 +55,7 @@ function MarketImage({ v, sq }: { v: MarketView; sq: boolean }) {
         <div style={{ display: "flex", color: "#fb7185" }}>{ys === null ? "NO —" : `NO ${100 - y}%`}</div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 22, fontSize: 22, color: "#a8a29e" }}>
-        <div style={{ display: "flex" }}>{v.buyable ? `Buying closes ${fmtTime(closes)}` : "Buying closed"}</div>
+        <div style={{ display: "flex" }}>{m.isResolved ? "Settled" : v.buyable ? `Buying closes ${fmtTime(closes)}` : "Buying closed"}</div>
         <div style={{ display: "flex" }}>Powered by Panta</div>
       </div>
     </div>

@@ -1,10 +1,10 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import { esc, findDeadline, fmtWat, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
+import { esc, findDeadline, fmtWat, formatReceiptHtml, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
-  walletsFor, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
+  walletsFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
 /**
@@ -21,6 +21,7 @@ export const COMMANDS = [
   { command: "mine", description: "Your positions and winnings to claim" },
   { command: "link", description: "Link your Solana wallet" },
   { command: "admin", description: "Creator dashboard (group admins)" },
+  ...(SANDBOX ? [{ command: "settle", description: "Admins: settle a practice market: /settle yes" }] : []),
   { command: "help", description: "How Pot works" },
 ];
 
@@ -65,7 +66,7 @@ export function cardMessage(card: Card): { text: string; reply_markup?: InlineKe
 
 export function cardFor(view: MarketView, ref: Ref): Card {
   const id = view.market.id;
-  return renderCard(view.market, view.verdict, view.payout,
+  return renderCard(view.market, view.stats, view.payout,
     { buyYes: marketUrl(id, ref, "yes"), buyNo: marketUrl(id, ref, "no"), details: marketUrl(id, ref), blink: xShareFor(id, ref, shareTextFor(view)) },
     { now: Math.floor(Date.now() / 1000), sandbox: view.sandbox, practice: view.practice, buyable: view.buyable });
 }
@@ -76,7 +77,9 @@ export function draftPreview(d: MarketDraft, problems: string[]): string {
     `<b>Question:</b> ${esc(d.question)}`,
     `<b>Rule:</b> ${esc(d.resolutionRule)}`,
     `<b>Sources:</b> ${d.sourcesOfTruth.map(esc).join(", ")}`,
-    `<b>Buying closes:</b> ${esc(fmtWat(d.startTime))}`,
+    d.timing === "event" && d.eventStartTime
+      ? `<b>Kick-off / start:</b> ${esc(fmtWat(d.eventStartTime))}\n<b>Buying closes:</b> ${esc(fmtWat(d.startTime))}${d.startTime === d.eventStartTime ? " (at kick-off)" : ""}`
+      : `<b>Buying closes:</b> ${esc(fmtWat(d.startTime))}`,
     `<b>Event ends:</b> ${esc(fmtWat(d.endTime))}`,
     `<b>Result by:</b> ${esc(fmtWat(d.resolutionTime))}`,
     `<b>Type:</b> ${d.marketType}${d.eventInProgress ? " (event in progress)" : ""} · fee $${d.creationFeeUsdc} · category ${d.category} · region ${esc(d.region)}`,
@@ -86,6 +89,22 @@ export function draftPreview(d: MarketDraft, problems: string[]): string {
   if (problems.length) lines.push("", "❌ <b>Can't create yet:</b> " + problems.map(esc).join("; "));
   lines.push("", "<i>Want changes? Reply to this message with what to change (e.g. \"make the deadline 30 June 2027\"), or use <code>/edit ends 31 May 2027 23:00</code>. Fields: " + EDIT_FIELDS.join(", ") + ".</i>");
   return lines.join("\n") + SANDBOX_NOTE;
+}
+
+export function choiceText(c: DraftChoice): string {
+  return [
+    `🔀 <b>Panta markets are YES/NO only</b>, and "${esc(c.question.replace(/^\/new(@\w+)?\s*/i, "").slice(0, 120))}" has several possible answers.`,
+    "",
+    "Pick which YES/NO markets to draft (tap more than one if you like):",
+    ...c.options.map((o) => `• ${esc(o.question)}`),
+    c.rephrase ? `\nOr make it one question: <i>${esc(c.rephrase)}</i>` : "\nOr send /new with your own YES/NO question.",
+  ].join("\n");
+}
+export function choiceKeyboard(c: DraftChoice): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  c.options.forEach((o, i) => kb.text(`${o.used ? "✅" : "➕"} ${o.label}`, `opt:${c.id}:${i}`).row());
+  if (c.rephrase) kb.text("✍️ Rephrase as one YES/NO", `opt:${c.id}:r`);
+  return kb;
 }
 
 const draftKeyboard = (id: string, d: MarketDraft, problems: string[]) => {
@@ -128,8 +147,9 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       ? "3) Members tap Buy YES / Buy NO and sign a free message (no real money). I post the pot as it grows, so you can see how a real market would move."
       : "3) Members tap Buy YES / Buy NO and sign in Phantom. I post the pot as it grows, then the result and claim links.",
     "",
-    "Every card shows a verdict (Thin / Crowded / Overconfident / Ordinary) so nobody mistakes a thin price for a real crowd, plus 'pays about $X if right' from the pool.",
-    "Commands: /new /markets /share /top /mine /link /admin",
+    "When a market resolves I post a receipt: the result, the final pot, and who won or lost how much.",
+    SANDBOX ? "Practice markets have no oracle, so the group admin settles them after the event: <code>/settle yes</code> or <code>/settle no</code>." : "",
+    "Commands: /new /markets /share /top /mine /link /admin" + (SANDBOX ? " /settle" : ""),
   ].join("\n");
 
   bot.command(["start", "help"], async (ctx) => {
@@ -151,12 +171,48 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     } catch (e) {
       return ctx.reply((e as Error).message);
     }
+    await showResult(ctx, r);
+  });
+
+  /** Reply to a drafter result: a draft preview, a clarifying question, a polite refusal, or YES/NO options to pick. */
+  async function showResult(ctx: Context, r: DraftResult) {
+    if (!ctx.chat || !ctx.from) return;
     if (r.kind === "clarify") return ctx.reply(`🤔 ${r.question}\n\nSend /new again with a bit more detail.`);
+    if (r.kind === "refuse") return ctx.reply(`${r.message}\n\n💡 ${r.suggestion}`);
+    if (r.kind === "multi") {
+      const c = await saveChoice(ctx.chat.id, ctx.from.id, { question: r.question, options: r.options, rephrase: r.rephrase });
+      return ctx.reply(choiceText(c), { parse_mode: "HTML", reply_markup: choiceKeyboard(c) });
+    }
     const draft = r.draft;
     const problems = validateDraft(draft);
     const row = await saveDraft(ctx.chat.id, ctx.from.id, draft);
     const msg = await ctx.reply(draftPreview(draft, problems), { parse_mode: "HTML", reply_markup: draftKeyboard(row.id, draft, problems), link_preview_options: { is_disabled: true } });
     await updateDraft(row.id, { message_id: msg.message_id });
+  }
+
+  // Multi-outcome: the drafting admin taps which YES/NO markets to draft (one tap per market), or the one-question rephrase.
+  bot.callbackQuery(/^opt:(c_[\w-]+):(\d+|r)$/, async (ctx) => {
+    const c = await getChoice(ctx.match[1]);
+    if (!c) return ctx.answerCallbackQuery({ text: "That list expired. Send /new again." });
+    if (c.admin_id !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Only the admin who asked can pick." });
+    const pick = ctx.match[2];
+    const opt = pick === "r" ? (c.rephrase ? { label: "Rephrased", question: c.rephrase } : null) : c.options[Number(pick)];
+    if (!opt) return ctx.answerCallbackQuery({ text: "Option not found." });
+    await ctx.answerCallbackQuery({ text: `Drafting: ${opt.label}` });
+    if (pick !== "r") {
+      c.options[Number(pick)].used = true;
+      await updateChoice(c);
+      await ctx.editMessageReplyMarkup({ reply_markup: choiceKeyboard(c) }).catch(() => undefined);
+    }
+    await ctx.replyWithChatAction("typing").catch(() => undefined);
+    let r: DraftResult;
+    try {
+      r = await drafter(opt.question);
+    } catch (e) {
+      return ctx.reply((e as Error).message);
+    }
+    if (r.kind === "multi") return ctx.reply("I couldn't turn that into a single YES/NO market. Try /new with a YES/NO question.");
+    await showResult(ctx, r);
   });
 
   /** Save an edited draft and refresh its preview (edit in place; send a new one if that fails). */
@@ -335,8 +391,10 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       else if (!pos.length) out.push("", "No practice buys yet. Open a market card in your group and tap a Buy button.", `Linked wallet${wallets.length === 1 ? "" : "s"}: ${wallets.map(shortW).join(", ")}`);
       for (const p of (pos ?? []).slice(0, 15)) {
         out.push("", `• <b>${p.side.toUpperCase()} ${usd(p.amountUsdc)}</b> on ${esc(p.title)}`,
-          `   ${p.shares.toFixed(2)} shares · pays about ${usd(p.paysIfWin)} if ${p.side.toUpperCase()} wins`,
-          `   ${p.open ? `Buying open until ${fmtWat(p.closes)}` : "Buying closed, waiting for the result"} · ${esc(`${WEB_URL}/m/${p.marketId}`)}`);
+          p.result
+            ? `   Result ${p.result.toUpperCase()}: ${p.result === p.side ? `✅ won, pays about ${usd(p.payout)}` : "❌ lost"}`
+            : `   ${p.shares.toFixed(2)} shares · pays about ${usd(p.paysIfWin)} if ${p.side.toUpperCase()} wins`,
+          `   ${p.result ? "Settled" : p.open ? `Buying open until ${fmtWat(p.closes)}` : "Buying closed, waiting for the result"} · ${esc(`${WEB_URL}/m/${p.marketId}`)}`);
       }
       return ctx.reply(out.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
     }
@@ -367,10 +425,41 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       if (!v) { out.push(`• <code>${r.market_id.slice(0, 8)}…</code>: couldn't load`); continue; }
       total += v.royalty.estimatedUsdc;
       const claim = v.royalty.claimableNow && r.creator_wallet ? `\n   claim: ${esc(`${WEB_URL}/claim/${r.market_id}?kind=creator&w=${r.creator_wallet}`)}` : "";
-      out.push(`• <b>${esc(v.market.title)}</b>\n   pot ${usd(v.royalty.poolUsdc)} · royalty ${(v.royalty.royaltyBps / 100).toFixed(0)}% ≈ <b>${usd(v.royalty.estimatedUsdc)}</b> · ${v.verdict.kind} · ${v.royalty.note}${claim}`);
+      out.push(`• <b>${esc(v.market.title)}</b>\n   pot ${usd(v.royalty.poolUsdc)} · royalty ${(v.royalty.royaltyBps / 100).toFixed(0)}% ≈ <b>${usd(v.royalty.estimatedUsdc)}</b> · ${v.royalty.note}${claim}`);
     }
     out.push("", `Estimated royalties: <b>${usd(total)}</b> (estimate; Panta sets the final number).`);
     await ctx.reply(out.join("\n") + SANDBOX_NOTE, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+  });
+
+  bot.command("settle", async (ctx) => {
+    if (!ctx.chat || !ctx.from) return;
+    if (!SANDBOX) return ctx.reply("Live markets are settled by Panta's resolver. I post the receipt here automatically when the result is in.");
+    if (!isGroup(ctx)) return ctx.reply("Use /settle in the group that created the practice market.");
+    if (!(await isAdmin(ctx))) return ctx.reply("Only group admins can settle a practice market.");
+    const args = (ctx.match?.toString().trim() ?? "").split(/\s+/).filter(Boolean);
+    const outcome = args.map((a) => a.toLowerCase()).find((a) => a === "yes" || a === "no") as "yes" | "no" | undefined;
+    const idArg = args.find((a) => !/^(yes|no)$/i.test(a));
+    if (!outcome) return ctx.reply("Usage: /settle yes  or  /settle no\nIf the group has more than one open practice market: /settle <id> yes");
+    const mine = await practiceMarketsForChat(ctx.chat.id);
+    let target: (typeof mine)[number] | undefined;
+    if (idArg) {
+      target = mine.find((m) => m.id === idArg || (idArg.length >= 6 && m.id.startsWith(idArg)));
+      if (!target) return ctx.reply("I can't find that practice market in this group. Only the group that created a market can settle it.");
+    } else {
+      const open = mine.filter((m) => !m.outcome);
+      if (!open.length) return ctx.reply("This group has no unsettled practice markets.");
+      if (open.length > 1) return ctx.reply(["Which one? Send the id with the result:", ...open.slice(0, 8).map((m) => `• <code>/settle ${m.id.slice(0, 8)} ${outcome}</code>: ${esc(m.draft.question)}`)].join("\n"), { parse_mode: "HTML" });
+      target = open[0];
+    }
+    if (target.outcome) return ctx.reply(`Already settled: ${target.outcome.toUpperCase()}. Each market gets one result and one receipt.`);
+    const now = Math.floor(Date.now() / 1000);
+    if (now < target.draft.startTime) return ctx.reply(`Buying is still open until ${fmtWat(target.draft.startTime)}. Settle it after the event, using the rule's source.`);
+    const res = await settlePracticeMarket(target.id, outcome, ctx.from.id);
+    if (res.already) return ctx.reply(`Already settled: ${res.outcome.toUpperCase()}.`);
+    const view = await getMarketView(target.id);
+    const groups = new Map<number, number>((await groupsForMarket(target.id)).map((g) => [Number(g.chat_id), g.created_by_group]));
+    groups.set(ctx.chat.id, 1); // always post in the settling group, even with no buys
+    for (const [chatId, created] of groups) await postReceipt(ctx.api, chatId, view, { force: !!created });
   });
 
   bot.callbackQuery("noop", (ctx) => ctx.answerCallbackQuery());
@@ -391,6 +480,8 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       await ctx.replyWithChatAction("typing").catch(() => undefined);
       const r = await drafter(text, { previous: row.draft, instruction: text });
       if (r.kind === "clarify") return ctx.reply(`🤔 ${r.question}`);
+      if (r.kind === "refuse") return ctx.reply(`${r.message}\n\n💡 ${r.suggestion}`);
+      if (r.kind === "multi") return ctx.reply("Panta markets are YES/NO only. Ask for one YES/NO question.");
       await showEdited(ctx, row.id, ctx.chat.id, row.message_id, r.draft);
     } catch (e) {
       await ctx.reply((e as Error).message);
@@ -411,8 +502,8 @@ export async function notifyTick(bot: Bot) {
       const buyer = owner ? `${esc(owner)} (${shortW(b.wallet)})` : shortW(b.wallet);
       const who = b.sharer_tg_id ? ` via ${esc(await memberName(b.sharer_tg_id) ?? "a member")}'s link` : "";
       const fresh = b.new_to_panta ? "\n🎉 First ever Panta trade for this wallet" : b.new_to_pot ? "\n👋 First Pot buy for this wallet" : "";
-      const yes = v?.verdict.numbers.yesSplit;
-      const state = v ? `\nPot now ${usd(v.market.totalVolumeUsdc || v.market.volumeUsdc)}${yes != null ? ` · YES ${Math.round(yes * 100)}% / NO ${100 - Math.round(yes * 100)}%` : ""} · ${esc(v.verdict.kind)}` : "";
+      const yes = v?.stats.yesSplit;
+      const state = v ? `\nPot now ${usd(v.market.totalVolumeUsdc || v.market.volumeUsdc)}${yes != null ? ` · YES ${Math.round(yes * 100)}% / NO ${100 - Math.round(yes * 100)}%` : ""}` : "";
       const tag = v?.practice ? "\n🧪 <i>Practice market: no real money</i>" : SANDBOX ? " 🧪" : "";
       const kb = v?.buyable ? new InlineKeyboard().url("Buy too", marketUrl(b.market_id, { kind: "group", chatId: Number(b.chat_id) })) : undefined;
       await bot.api.sendMessage(b.chat_id!, `${b.side === "yes" ? "🟩" : "🟥"} ${buyer} bought <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)} on <b>${esc(title)}</b>${who}${state}${fresh}${tag}`, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
@@ -422,19 +513,50 @@ export async function notifyTick(bot: Bot) {
   }
 }
 
+/**
+ * Posts one settlement receipt per market per group. Idempotent: the receipts table claim (market, chat) wins once;
+ * if sending fails the claim is released so a later tick retries. Groups with no buys only get one if they created it.
+ */
+export async function postReceipt(api: Bot["api"], chatId: number, view: MarketView, opts: { force?: boolean } = {}): Promise<"posted" | "already" | "skipped" | "failed"> {
+  const id = view.market.id;
+  try {
+    const receipt = await buildReceipt(view, { chatId });
+    if (!receipt.people.length && !opts.force) {
+      await setGroupMarketState(chatId, id, { settled_notified: 1 });
+      return "skipped";
+    }
+    if (!(await claimReceipt(id, chatId))) return "already";
+    try {
+      const kb = isPublicHttps() ? new InlineKeyboard().url("Full receipt", marketUrl(id, { kind: "group", chatId })) : undefined;
+      const msg = await api.sendMessage(chatId, formatReceiptHtml(receipt), { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+      await setReceiptMessage(id, chatId, msg.message_id);
+      await setGroupMarketState(chatId, id, { settled_notified: 1, last_phase: "resolved" });
+      return "posted";
+    } catch (e) {
+      await releaseReceipt(id, chatId);
+      throw e;
+    }
+  } catch (e) {
+    console.error("[bot] receipt failed:", safeErr(e));
+    return "failed";
+  }
+}
+
 export async function settleTick(bot: Bot) {
   for (const r of (await allGroupMarkets()).filter((x) => !x.settled_notified)) {
     const v = await getMarketView(r.market_id).catch(() => null);
     if (!v) continue;
-    const phase = v.market.isResolved ? "resolved" : v.market.phase;
+    if (v.market.isResolved) {
+      // Post the receipt whenever we first see it resolved (even if we never saw it open).
+      await postReceipt(bot.api, Number(r.chat_id), v, { force: !!r.created_by_group });
+      continue;
+    }
+    const phase = v.market.phase;
     if (phase === r.last_phase) continue;
     if (!(await claimPhase(r.chat_id, r.market_id, r.last_phase, phase))) continue; // another instance handled it
     if (!r.last_phase) continue; // first observation: just remember it
     try {
-      if (phase === "resolved") {
-        await bot.api.sendMessage(r.chat_id, `🏁 <b>${esc(v.market.title)}</b> resolved <b>${v.market.yesWins ? "YES" : "NO"}</b>. Winners: DM me /mine to claim.${r.created_by_group ? " Admin: /admin for your royalty." : ""}`, { parse_mode: "HTML" });
-        await setGroupMarketState(r.chat_id, r.market_id, { settled_notified: 1 });
-      } else if (phase === "secondary") {
+      if (phase === "secondary") {
         await bot.api.sendMessage(r.chat_id, `🔒 Buying closed on <b>${esc(v.market.title)}</b>. Final pot ${usd(v.market.totalVolumeUsdc)}. ${r.created_by_group ? `Creator royalty ≈ ${usd(v.royalty.estimatedUsdc)} (/admin).` : ""}`, { parse_mode: "HTML" });
       }
     } catch (e) {

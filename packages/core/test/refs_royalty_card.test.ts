@@ -4,7 +4,7 @@ import { royaltyBpsForTilt, estimateCreatorRoyalty } from "../src/royalty";
 import { renderCard, splitBar, buyable } from "../src/card";
 import { marketActionGet, parseAmount, xIntentUrl, shareText, ACTION_RULES, actionHeaders, SOLANA_MAINNET } from "../src/actions";
 import { normalizeMarket } from "../src/normalize";
-import { computeVerdict, estimatePayout } from "../src/verdict";
+import { estimatePayout, marketStats } from "../src/payout";
 import type { RawDetail } from "../src/types";
 
 describe("refs", () => {
@@ -49,17 +49,18 @@ describe("sandbox normalisation + card", () => {
     expect(m.degraded).toBe(true);
     expect(m.yesPrice).toBe(0.5);
   });
-  it("renders a Thin card with sandbox label, Powered by Panta and buy buttons only while buyable", () => {
-    const v = computeVerdict(m, now);
+  it("renders a simple card (no verdict) with sandbox label, Powered by Panta and buy buttons only while buyable", () => {
+    const v = marketStats(m);
     const p = estimatePayout(m);
-    expect(v.kind).toBe("Thin");
     // Sandbox market's startTime is in the past, so it is not buyable by time.
     expect(buyable(m, now)).toBe(false);
     const open = { ...m, startTime: now + 3600, primaryPhaseEndTime: now + 3600 };
     const card = renderCard(open, v, p, { buyYes: "https://x/y", buyNo: "https://x/n", details: "https://x/d", blink: "https://x.com/intent/post?url=x" }, { now, sandbox: true });
     expect(card.html).toMatch(/Sandbox/);
     expect(card.html).toMatch(/Powered by Panta/);
-    expect(card.html).toMatch(/Thin/);
+    expect(card.html).not.toMatch(/Thin|Ordinary|Crowded|Overconfident|verdict/i);
+    expect(card.html).toMatch(/No buys yet/);
+    expect(card.html).toMatch(/Pot \$0\.00 · 👤 0 people/);
     expect(card.keyboard[0].map((b) => b.text)).toEqual(["🟩 Buy YES", "🟥 Buy NO"]);
     const closed = renderCard(m, v, p, { buyYes: "a", buyNo: "b", details: "c" }, { now, sandbox: true });
     expect(closed.keyboard.flat().some((b) => b.text.includes("Buy"))).toBe(false);
@@ -78,14 +79,14 @@ describe("sandbox normalisation + card", () => {
 
 describe("actions", () => {
   it("builds a GET payload with preset and custom amounts, carrying the ref", () => {
-    const a = marketActionGet({ marketId: "M1", title: "T", icon: "https://i", verdictLine: "Thin.", yesPct: 0.6, paysYes: 1.5, paysNo: 2.5, buyable: true, ref: "xBaheet_", sandbox: false });
+    const a = marketActionGet({ marketId: "M1", title: "T", icon: "https://i", yesPct: 0.6, paysYes: 1.5, paysNo: 2.5, buyable: true, ref: "xBaheet_", sandbox: false });
     expect(a.links!.actions.length).toBe(7);
     expect(a.links!.actions[0].href).toBe("/api/actions/m/M1?side=yes&amount=2&ref=xBaheet_");
     expect(a.links!.actions[6].href).toContain("amount={amount}");
     expect(a.description).toMatch(/Powered by Panta/);
   });
   it("disables when not buyable", () => {
-    const a = marketActionGet({ marketId: "M1", title: "T", icon: "https://i", verdictLine: "", yesPct: null, paysYes: null, paysNo: null, buyable: false, ref: "web", sandbox: true });
+    const a = marketActionGet({ marketId: "M1", title: "T", icon: "https://i", yesPct: null, paysYes: null, paysNo: null, buyable: false, ref: "web", sandbox: true });
     expect(a.disabled).toBe(true);
     expect(a.links).toBeUndefined();
   });
@@ -98,8 +99,8 @@ describe("actions", () => {
     expect(x.origin + x.pathname).toBe("https://x.com/intent/post");
     expect(x.searchParams.get("url")).toBe("https://pot.example/m/M1?ref=g-1&rs=abc");
     expect(x.searchParams.get("text")).toBe("Will it rain? Pick a side:");
-    expect(shareText({ title: "Will it rain?", yesPct: 0.71, verdict: "Ordinary", practice: true })).toBe("Will it rain? Right now 71% of the money says YES (Ordinary). Pick a side on Pot (practice market, no real money):");
-    expect(shareText({ title: "x".repeat(300), yesPct: null, verdict: "Thin", practice: false }).length).toBeLessThan(200);
+    expect(shareText({ title: "Will it rain?", yesPct: 0.71, practice: true })).toBe("Will it rain? Right now 71% of the money says YES. Pick a side on Pot (practice market, no real money):");
+    expect(shareText({ title: "x".repeat(300), yesPct: null, practice: false }).length).toBeLessThan(200);
     expect(ACTION_RULES).toContainEqual({ pathPattern: "/m/*", apiPath: "/api/actions/m/*" });
     expect(actionHeaders(SOLANA_MAINNET)["X-Blockchain-Ids"]).toBe(SOLANA_MAINNET);
   });
