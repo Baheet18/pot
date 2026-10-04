@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const pm = await getPracticeMarket(settle.id);
     if (!pm || pm.chat_id !== DEMO_CHAT) return Response.json({ error: "only demo-group practice markets" }, { status: 400 });
     const res = await settlePracticeMarket(settle.id, settle.outcome, null);
-    const receipt = await buildReceipt(await getMarketView(settle.id), { chatId: DEMO_CHAT });
+    const receipt = await buildReceipt(await getMarketView(settle.id)); // every buyer (demo buys come from the web, not a group)
     return Response.json({ already: res.already, outcome: res.outcome, receipt, html: formatReceiptHtml(receipt) });
   }
   return Response.json({ summary: await testDataSummary() });
