@@ -89,7 +89,7 @@ export default async function MarketPage({ params, searchParams }: Props) {
                   <thead className="text-xs text-stone-400"><tr><th className="py-1 pr-2">Who</th><th className="pr-2">Side</th><th className="pr-2 text-right">Stake</th><th className="pr-2 text-right">Payout</th><th className="text-right">Net</th></tr></thead>
                   <tbody>{receipt.people.map((x) => (
                     <tr key={x.wallet} className="border-t border-white/10">
-                      <td className="py-1.5 pr-2">{x.won ? "🏆" : "💸"} {x.name}</td>
+                      <td className="py-1.5 pr-2">{x.won ? (x.net >= 0 ? "🏆" : "✅") : "💸"} {x.name}</td>
                       <td className="pr-2">{x.sides.map((s) => s.toUpperCase()).join("+")}</td>
                       <td className="pr-2 text-right">${x.stake.toFixed(2)}</td>
                       <td className="pr-2 text-right">{x.won ? `≈$${x.payout.toFixed(2)}` : "$0"}</td>

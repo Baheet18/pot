@@ -61,6 +61,17 @@ describe("settlement receipt math (live rules)", () => {
     expect(html).toContain("Practice money only");
   });
 
+  it("marks winners who are still down with ✅ and explains it once", () => {
+    const t1 = sig("365SYRnP");
+    const m = resolved(true);
+    const r = computeReceipt(m, estimatePayout(m), raw.trades, [{ signature: t1.signature, wallet: t1.wallet, side: "yes", amountUsdc: 1000, chatId: null }], { practice: true, feeRate: 0 });
+    const html = formatReceiptHtml(r);
+    expect(r.people[0].won).toBe(true);
+    expect(r.people[0].net).toBeLessThan(0);
+    expect(html).toMatch(/✅ D95w…\w{4} · YES \$1,000 → ≈\$/);
+    expect(html).toContain("✅ = right side but still down");
+  });
+
   it("shows an empty-group line and caps long lists", () => {
     const m = resolved(true);
     const empty = computeReceipt(m, estimatePayout(m), raw.trades, [], { practice: true, feeRate: 0, chatId: -9 });

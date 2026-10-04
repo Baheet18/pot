@@ -87,11 +87,13 @@ export function formatReceiptHtml(r: Receipt, opts: { maxPeople?: number } = {})
   for (const x of r.people.slice(0, max)) {
     const sides = x.sides.length > 1 ? "YES+NO" : x.sides[0].toUpperCase();
     const out = x.won ? `≈${money(x.payout)}` : "$0";
-    lines.push(`${x.won ? "🏆" : "💸"} ${esc(x.name.slice(0, 24))} · ${sides} ${money(x.stake)} → ${out} (${x.won ? "≈" : ""}${signed(x.net)})`);
+    // 🏆 right side and up · ✅ right side but bought late, so still down · 💸 wrong side
+    lines.push(`${x.won ? (x.net >= 0 ? "🏆" : "✅") : "💸"} ${esc(x.name.slice(0, 24))} · ${sides} ${money(x.stake)} → ${out} (${x.won ? "≈" : ""}${signed(x.net)})`);
   }
   if (r.people.length > max) lines.push(`…and ${r.people.length - max} more`);
   if (r.others.people) lines.push(`+ ${r.others.people} buyer${r.others.people === 1 ? "" : "s"} from outside this group (${money(r.others.stake)})`);
   lines.push(RULE);
+  if (r.people.some((x) => x.won && x.net < 0)) lines.push("<i>✅ = right side but still down: they bought when that side was already pricey.</i>");
   lines.push(r.feeRate > 0
     ? `<i>≈ approx. Net includes Panta's ${Math.round(r.feeRate * 100)}% trading fee. Panta sets final payouts after its 1-hour dispute window. Winners: DM me /mine to claim.</i>`
     : `<i>≈ approx, using Panta's payout rules. Practice money only: nothing to claim. (Live markets also charge a 2% trading fee per buy.)</i>`);
