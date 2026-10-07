@@ -1,4 +1,5 @@
 "use client";
+import { friendlyWalletError } from "@pot/core/src/walleterr";
 import { useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -23,7 +24,7 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
     if (!publicKey) return;
     setState("quoting"); setMsg("");
     try { setS(await api<Start>("/api/pot/create/start", { draftId, token, wallet: publicKey.toBase58() })); setState("ready"); }
-    catch (e) { setState("error"); setMsg((e as Error).message); }
+    catch (e) { setState("error"); setMsg(friendlyWalletError(e)); }
   }
   async function register(proof: { signature: string } | { practiceMessage: string; practiceSignature: string }) {
     if (!s || !publicKey) return;
@@ -37,7 +38,7 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
       if (!s.transaction) throw new Error("Panta returned no transaction to sign.");
       setState("signing");
       await register({ signature: await signSendConfirm(connection, s.transaction, signTransaction) });
-    } catch (e) { setState("error"); setMsg((e as Error).message); }
+    } catch (e) { setState("error"); setMsg(friendlyWalletError(e)); }
   }
   async function signPractice() {
     if (!s?.practiceMessage || !signMessage) { setState("error"); setMsg("This wallet can't sign messages. Try Phantom."); return; }
@@ -45,7 +46,7 @@ function Inner({ draftId, token, sandbox, liveWrites, fee }: { draftId: string; 
       setState("signing");
       const sig = await signMessage(new TextEncoder().encode(s.practiceMessage));
       await register({ practiceMessage: s.practiceMessage, practiceSignature: bs58.encode(sig) });
-    } catch (e) { setState("error"); setMsg((e as Error).message); }
+    } catch (e) { setState("error"); setMsg(friendlyWalletError(e)); }
   }
   return (
     <div className="space-y-3">

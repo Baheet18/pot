@@ -36,3 +36,31 @@ export const isWallet = (s: string) => {
   try { return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s) && PublicKey.isOnCurve(new PublicKey(s).toBytes()); } catch { return false; }
 };
 export const isMarketId = (s: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+
+// ---------------------------------------------------------------- live funds pre-check (read-only RPC; never blocks on RPC failure)
+export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+/** SOL a wallet should hold to pay network fees + Panta's position/receipt account rent. */
+export const MIN_SOL = 0.005;
+export interface WalletFunds { sol: number; usdc: number }
+type FundsReader = (wallet: string) => Promise<WalletFunds | null>;
+const rpcFunds: FundsReader = async (wallet) => {
+  try {
+    const owner = new PublicKey(wallet);
+    const [lamports, toks] = await Promise.all([
+      connection().getBalance(owner),
+      connection().getParsedTokenAccountsByOwner(owner, { mint: new PublicKey(USDC_MINT) }),
+    ]);
+    const usdc = toks.value.reduce((t, a) => t + Number(a.account.data.parsed?.info?.tokenAmount?.uiAmount ?? 0), 0);
+    return { sol: lamports / 1e9, usdc };
+  } catch { return null; }
+};
+let reader: FundsReader = rpcFunds;
+export const readWalletFunds = (w: string) => reader(w);
+/** Tests only. */
+export const setFundsReader = (r: FundsReader | null) => { reader = r ?? rpcFunds; };
+export function fundsProblem(f: WalletFunds | null, needUsdc: number): { code: string; message: string } | null {
+  if (!f) return null; // RPC unavailable: let the wallet/Panta decide rather than block a good buyer
+  if (f.usdc + 1e-9 < needUsdc) return { code: "INSUFFICIENT_USDC", message: `This wallet has $${f.usdc.toFixed(2)} USDC; this needs $${needUsdc.toFixed(2)} (including fees). Add USDC on Solana and try again.` };
+  if (f.sol < MIN_SOL) return { code: "INSUFFICIENT_SOL", message: `This wallet has ${f.sol.toFixed(4)} SOL; keep at least ${MIN_SOL} SOL for Solana network fees. Add a little SOL and try again.` };
+  return null;
+}

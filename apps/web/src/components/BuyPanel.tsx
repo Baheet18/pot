@@ -1,4 +1,5 @@
 "use client";
+import { friendlyWalletError } from "@pot/core/src/walleterr";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -11,7 +12,7 @@ import bs58 from "bs58";
 
 type Side = "yes" | "no";
 interface Start { orderId: string; quoteId: string; side: Side; amountUsdc: number; shares: number; feeUsdc: number; paysAboutIfRight: number | null; transaction: string; practiceMessage: string | null; sandbox: boolean }
-interface Finish { status: string; attributed: boolean; newToPanta: boolean; newToPot: boolean; recorded: boolean; nameClaim?: string | null }
+interface Finish { status: string; pending?: boolean; attributed: boolean; newToPanta: boolean; newToPot: boolean; recorded: boolean; nameClaim?: string | null }
 type Step = "idle" | "quoting" | "quoted" | "signing" | "finishing" | "done" | "error";
 
 export interface BuyPanelProps { marketId: string; initialSide?: Side; initialAmount?: number; refStr: string; rs: string | null; buyable: boolean; sandbox: boolean; liveWrites: boolean; rpc: string }
@@ -28,6 +29,11 @@ function Inner(p: BuyPanelProps) {
   const [msg, setMsg] = useState("");
   const [res, setRes] = useState<Finish | null>(null);
   const [sig, setSig] = useState("");
+  const [proof, setProof] = useState<{ signature: string } | { practiceMessage: string; practiceSignature: string } | null>(null);
+  async function checkAgain() {
+    if (!proof) return;
+    try { await finish(proof); } catch (e) { setStep("error"); setMsg(friendlyWalletError(e)); }
+  }
 
   if (!p.buyable) return <p className="text-sm text-stone-400">Buying is closed: this market has left its buy-only phase. Graduated markets trade on the order book at <a className="underline" href="https://www.panta.market/">panta.market</a>.</p>;
   if (!p.sandbox && !p.liveWrites) return <p className="text-sm text-amber-200">Live buying is switched off in this preview build (Phase 1: no real money). The flow is built and tested on Panta&apos;s sandbox.</p>;
@@ -38,16 +44,18 @@ function Inner(p: BuyPanelProps) {
     try {
       const s = await api<Start>("/api/pot/buy/start", { marketId: p.marketId, side, amountUsdc: Number(amount), wallet: publicKey.toBase58(), ref: p.refStr, rs: p.rs });
       setQ(s); setAt(Date.now()); setStep("quoted");
-    } catch (e) { setStep("error"); setMsg((e as Error).message); }
+    } catch (e) { setStep("error"); setMsg(friendlyWalletError(e)); }
   }
 
   async function finish(proof: { signature: string } | { practiceMessage: string; practiceSignature: string }) {
     if (!q || !publicKey) return;
+    setProof(proof);
     setStep("finishing"); setSig("signature" in proof ? proof.signature : "practice (free message signature)");
     const f = await api<Finish>("/api/pot/buy/finish", { orderId: q.orderId, quoteId: q.quoteId, ...proof, wallet: publicKey.toBase58(), marketId: p.marketId, side: q.side, amountUsdc: q.amountUsdc, ref: p.refStr, rs: p.rs, channel: "web" });
     setRes(f); setStep(f.status === "confirmed" ? "done" : "error");
     if (f.status === "confirmed") router.refresh(); // show the updated pot and split
-    if (f.status !== "confirmed") setMsg(`Panta reports the order as ${f.status}.`);
+    if (f.pending) setMsg("Your transaction was sent but Solana hasn't confirmed it yet. Don't pay again: tap “Check again” in a few seconds.");
+    else if (f.status !== "confirmed") setMsg(`Panta reports the order as ${f.status}. If USDC left your wallet, tap “Check again”; otherwise get a fresh quote.`);
   }
 
   async function signAndBuy() {
@@ -64,7 +72,7 @@ function Inner(p: BuyPanelProps) {
         if (!signTransaction || !q.transaction) throw new Error("Wallet can't sign this transaction.");
         await finish({ signature: await signSendConfirm(connection, q.transaction, signTransaction) });
       }
-    } catch (e) { setStep("error"); setMsg((e as Error).message); }
+    } catch (e) { setStep("error"); setMsg(friendlyWalletError(e)); }
   }
 
   return (
@@ -108,6 +116,7 @@ function Inner(p: BuyPanelProps) {
             </div>
           )}
           {msg && <div className="text-sm text-rose-300">{msg}</div>}
+          {step === "error" && proof && "signature" in proof && <button className="rounded-lg border border-stone-600 px-3 py-1 text-sm" onClick={checkAgain}>Check again</button>}
         </div>
       )}
     </div>

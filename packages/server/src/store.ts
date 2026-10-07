@@ -33,6 +33,12 @@ const SCHEMA = [
     shares DOUBLE PRECISION NOT NULL, created_ms BIGINT NOT NULL, PRIMARY KEY (signature, mode))`,
   `CREATE TABLE IF NOT EXISTS practice_results (
     id TEXT NOT NULL, mode TEXT NOT NULL, outcome TEXT NOT NULL, settled_by BIGINT, settled_at BIGINT NOT NULL, PRIMARY KEY (id, mode))`,
+  `CREATE TABLE IF NOT EXISTS orders (
+    order_id TEXT NOT NULL, mode TEXT NOT NULL, quote_id TEXT NOT NULL, market_id TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT NOT NULL,
+    amount_usdc DOUBLE PRECISION NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (order_id, mode))`,
+  `CREATE TABLE IF NOT EXISTS creates (
+    create_id TEXT NOT NULL, mode TEXT NOT NULL, draft_id TEXT NOT NULL, wallet TEXT NOT NULL, fee_usdc DOUBLE PRECISION NOT NULL, created_at BIGINT NOT NULL,
+    PRIMARY KEY (create_id, mode))`,
   `CREATE TABLE IF NOT EXISTS name_claims (
     id TEXT PRIMARY KEY, mode TEXT NOT NULL, signature TEXT NOT NULL, wallet TEXT NOT NULL, created_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS draft_choices (
@@ -243,7 +249,7 @@ export async function buysForWallets(wallets: string[]): Promise<BuyRow[]> {
 /** Test-mode reset: removes every row for MODE='test' (never touches live rows). Returns rows deleted per table. */
 /** Real Telegram user ids are large; ids below this are fixtures from scripts/tests. */
 const FAKE_TG_ID_MAX = 100000;
-const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades", "practice_results", "receipts", "draft_choices", "name_claims"] as const;
+const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades", "practice_results", "receipts", "draft_choices", "name_claims", "orders", "creates"] as const;
 /** Counts of test-mode rows (what wipeTestData would remove). */
 export async function testDataSummary(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -388,4 +394,21 @@ export async function buyerNames(signatures: string[]): Promise<Map<string, stri
   const rows = await all<{ signature: string; name: string }>(`SELECT b.signature, m.name FROM buys b JOIN members m ON m.tg_user_id=b.tg_user_id
     WHERE b.mode=? AND b.signature IN (${signatures.map(() => "?").join(",")})`, [MODE, ...signatures]);
   return new Map(rows.map((r) => [r.signature, r.name]));
+}
+
+// ---------------------------------------------------------------- live orders (what the server quoted, so finish can't be told a different side/amount)
+export interface OrderRow { order_id: string; quote_id: string; market_id: string; wallet: string; side: "yes" | "no"; amount_usdc: number; created_at: number }
+export async function saveOrder(o: { orderId: string; quoteId: string; marketId: string; wallet: string; side: "yes" | "no"; amountUsdc: number }) {
+  await run(`INSERT INTO orders (order_id, mode, quote_id, market_id, wallet, side, amount_usdc, created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
+    [o.orderId, MODE, o.quoteId, o.marketId, o.wallet, o.side, o.amountUsdc, now()]);
+}
+export async function getOrder(orderId: string): Promise<OrderRow | null> {
+  const r = await one<OrderRow>(`SELECT * FROM orders WHERE order_id=? AND mode=?`, [orderId, MODE]);
+  return r ? { ...r, amount_usdc: Number(r.amount_usdc), created_at: Number(r.created_at) } : null;
+}
+export async function saveCreate(c: { createId: string; draftId: string; wallet: string; feeUsdc: number }) {
+  await run(`INSERT INTO creates (create_id, mode, draft_id, wallet, fee_usdc, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING`, [c.createId, MODE, c.draftId, c.wallet, c.feeUsdc, now()]);
+}
+export async function getCreate(createId: string): Promise<{ draft_id: string; wallet: string; fee_usdc: number } | null> {
+  return (await one<{ draft_id: string; wallet: string; fee_usdc: number }>(`SELECT draft_id, wallet, fee_usdc FROM creates WHERE create_id=? AND mode=?`, [createId, MODE])) ?? null;
 }

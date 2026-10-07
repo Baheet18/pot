@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import { esc, findDeadline, fmtWat, formatReceiptHtml, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
+import { esc, findDeadline, fmtWat, formatReceiptHtml, receiptDue, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
@@ -576,6 +576,8 @@ export async function settleTick(bot: Bot) {
     const v = await getMarketView(r.market_id).catch(() => null);
     if (!v) continue;
     if (v.market.isResolved) {
+      // Live (real-money) markets wait out Panta's 1-hour dispute window first; practice receipts post at once.
+      if (!receiptDue(v.market, Math.floor(Date.now() / 1000), !SANDBOX && !v.practice)) continue;
       // Post the receipt whenever we first see it resolved (even if we never saw it open).
       await postReceipt(bot.api, Number(r.chat_id), v, { force: !!r.created_by_group });
       continue;

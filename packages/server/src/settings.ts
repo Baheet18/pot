@@ -17,5 +17,6 @@ export const CLUSTER: "mainnet" | "devnet" = SANDBOX ? "devnet" : "mainnet";
 export const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 export const DB_PATH = process.env.POT_DB_PATH || path.join(process.env.POT_ROOT || process.cwd().replace(/\/apps\/(web|bot)$/, ""), "data", "pot.db");
 /** Catalog image used when we can't upload one (must be public https). */
+// Live: Pot's own image (apps/web/public/market-default.png) so the Panta catalog never shows a third-party demo picture.
 export const DEFAULT_MARKET_IMAGE =
-  process.env.POT_DEFAULT_IMAGE_URL || "https://res.cloudinary.com/demo/image/upload/sample.jpg";
+  process.env.POT_DEFAULT_IMAGE_URL || (MODE === "live" && WEB_URL.startsWith("https://") ? `${WEB_URL}/market-default.png` : "https://res.cloudinary.com/demo/image/upload/sample.jpg");

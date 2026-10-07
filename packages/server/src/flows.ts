@@ -1,9 +1,9 @@
-import { estimateBuyPayout, parseRef, pantaUserId, refGroup, toCreateQuoteBody, validateDraft, type MarketDraft } from "@pot/core";
+import { LIMITS, estimateBuyPayout, parseRef, pantaUserId, refGroup, toCreateQuoteBody, validateDraft, type MarketDraft } from "@pot/core";
 import { randomBytes } from "node:crypto";
 import { getMarketView } from "./views";
 import { getWalletTrades, invalidate, pantaPost, PantaError } from "./panta";
-import { compileTx, isSandboxSignature, isSignature, isWallet, isMarketId, type PantaIx } from "./tx";
-import { createNameClaim, getDraft, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft, walletLinked } from "./store";
+import { compileTx, fundsProblem, readWalletFunds, isSandboxSignature, isSignature, isWallet, isMarketId, type PantaIx } from "./tx";
+import { createNameClaim, getCreate, getDraft, getOrder, saveCreate, saveOrder, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft, walletLinked } from "./store";
 import { refIsTrusted } from "./tokens";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
 import { newPracticeMessage, verifyPractice } from "./practice";
@@ -56,6 +56,11 @@ export async function startBuy(input: { marketId: string; side: string; amountUs
       sandbox: true, paysAboutIfRight: pays?.total ?? null, userId,
     };
   }
+  if (!SANDBOX) {
+    // Live: check the wallet can actually pay before asking it to sign (amount + 2% fee in USDC, plus SOL for network fees).
+    const problem = fundsProblem(await readWalletFunds(wallet), amount * 1.02);
+    if (problem) throw new FlowError(402, problem.code, problem.message);
+  }
   const q = await pantaPost<{ quoteId: string; shares: string; feeUsdc: string }>("/primaryorderquote/", { wallet, marketId, side, amountUsdc: amount.toFixed(2) }, { userId });
   const b = await pantaPost<{ orderId: string; instructions: PantaIx[]; recentBlockhash: string; lastValidBlockHeight: number; expectedShares?: string }>(
     "/primaryorderbuild/", { quoteId: q.quoteId, wallet, maxSlippageBps: 100 }, { userId });
@@ -63,6 +68,8 @@ export async function startBuy(input: { marketId: string; side: string; amountUs
   const pays = estimateBuyPayout(view.market, side, amount, shares);
   const transaction = SANDBOX ? "" : (await compileTx({ payer: wallet, instructions: b.instructions ?? [], recentBlockhash: b.recentBlockhash })).tx;
   const practiceMessage = SANDBOX ? newPracticeMessage("buy", wallet, marketId, `${side.toUpperCase()} $${amount.toFixed(2)}`, b.orderId) : null;
+  // Remember what was quoted, so finishBuy records the server's side/amount, not whatever the client sends back.
+  await saveOrder({ orderId: b.orderId, quoteId: q.quoteId, marketId, wallet, side, amountUsdc: amount });
   return {
     transaction, practiceMessage, sandboxMemo: false,
     orderId: b.orderId, quoteId: q.quoteId, side, amountUsdc: amount, shares, feeUsdc: Number(q.feeUsdc) || 0,
@@ -77,13 +84,25 @@ export async function finishBuy(input: {
   orderId: string; signature: string; wallet: string; marketId: string; side: "yes" | "no"; amountUsdc: number; quoteId?: string;
   ref?: string | null; rs?: string | null; channel: "web" | "blink" | "telegram";
 }) {
-  const { orderId, signature, wallet, marketId } = input;
+  const { orderId, signature, wallet } = input;
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(orderId)) throw bad("BAD_ORDER", "Bad order id");
   if (!isWallet(wallet)) throw bad("BAD_WALLET", "Bad wallet");
   if (!(isSignature(signature) || (SANDBOX && isSandboxSignature(signature)))) throw bad("BAD_SIGNATURE", "Bad signature");
   const { ref, parsed, userId } = resolveRef(input.ref, input.rs);
+  const order = await getOrder(orderId);
+  if (!order && !SANDBOX) throw new FlowError(404, "UNKNOWN_ORDER", "Pot doesn't know this order. Get a fresh quote and try again.");
+  if (order && order.wallet !== wallet) throw new FlowError(403, "WRONG_WALLET", "This order was quoted for a different wallet.");
+  const marketId = order?.market_id ?? input.marketId;
+  const side = order?.side ?? input.side;
+  const amountUsdc = order?.amount_usdc ?? input.amountUsdc;
+  const quoteId = order?.quote_id ?? input.quoteId;
 
-  await pantaPost("/primaryordersubmit/", { orderId, signature, wallet });
+  try {
+    await pantaPost("/primaryordersubmit/", { orderId, signature, wallet });
+  } catch (e) {
+    // Retry-safe: a second finish for the same order (e.g. after "still confirming") just re-verifies.
+    if (!(e instanceof PantaError && isAlreadySubmitted(e))) throw e;
+  }
   let status = "submitted";
   for (let i = 0; i < 10; i++) {
     const v = await pantaPost<{ status: string }>("/primaryorderverify/", { orderId, signature, wallet });
@@ -94,7 +113,7 @@ export async function finishBuy(input: {
   let attributed = false;
   if (status === "confirmed") {
     try {
-      const r = await pantaPost<{ status: string }>("/trades/", { signature, wallet, marketId, quoteId: input.quoteId, clientOrderId: orderId }, { userId });
+      const r = await pantaPost<{ status: string }>("/trades/", { signature, wallet, marketId, quoteId, clientOrderId: orderId }, { userId });
       attributed = r.status === "processed" || r.status === "attributed";
     } catch (e) {
       if (!(e instanceof PantaError)) throw e;
@@ -109,13 +128,14 @@ export async function finishBuy(input: {
   const chatId = refGroup(parsed);
   const rec = status === "confirmed"
     ? await recordBuy({
-        signature, marketId, wallet, side: input.side, amountUsdc: input.amountUsdc, ref, pantaUserId: userId, chatId,
+        signature, marketId, wallet, side, amountUsdc, ref, pantaUserId: userId, chatId,
         sharerTgId: parsed.kind === "member" ? parsed.userId : null, sharerX: parsed.kind === "x" ? parsed.handle : null,
         newToPanta, pantaStatus: status, attributed, channel: input.channel,
       })
     : { inserted: false, newToPot: false };
   invalidate(`/markets/${marketId}/`);
-  return { status, attributed, newToPanta, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: SANDBOX, nameClaim: await nameClaimFor(rec.inserted, signature, wallet) };
+  const pending = !["confirmed", "failed", "expired"].includes(status);
+  return { status, pending, attributed, newToPanta, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: SANDBOX, nameClaim: await nameClaimFor(rec.inserted, signature, wallet) };
 }
 
 // ---------------------------------------------------------------- create market (admin signs + pays)
@@ -138,9 +158,14 @@ export async function startCreate(draftId: string, wallet: string) {
   }
   const q = await pantaPost<{ createId: string; expectedEventPda: string; paymentUsdc: string }>(
     "/markets/create/quote/", toCreateQuoteBody(row.draft, wallet, DEFAULT_MARKET_IMAGE), { userId: `pot:g${row.chat_id}` });
+  // Never let an admin sign for a price Pot didn't show them: Panta's quoted payment must equal the $20 / $50 fee.
+  const feeUsdc = checkCreateQuote(q, row.draft);
+  const funds = fundsProblem(await readWalletFunds(wallet), feeUsdc);
+  if (funds) throw new FlowError(402, funds.code, funds.message);
   const b = await pantaPost<{ transaction: string; recentBlockhash: string; lastValidBlockHeight: number }>("/markets/create/build/", { createId: q.createId, wallet });
+  await saveCreate({ createId: q.createId, draftId, wallet, feeUsdc });
   await updateDraft(draftId, { creator_wallet: wallet, status: "building" });
-  return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc: Number(q.paymentUsdc) / 1e6, transaction: b.transaction, practiceMessage: null, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: false };
+  return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc, transaction: b.transaction, practiceMessage: null, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: false };
 }
 
 export async function finishCreate(draftId: string, createId: string, signature: string) {
@@ -148,6 +173,10 @@ export async function finishCreate(draftId: string, createId: string, signature:
   if (!row) throw new FlowError(404, "NO_DRAFT", "Draft not found");
   if (!/^[A-Za-z0-9_-]{3,80}$/.test(createId)) throw bad("BAD_CREATE", "Bad create id");
   if (!(isSignature(signature) || (SANDBOX && isSandboxSignature(signature)))) throw bad("BAD_SIGNATURE", "Bad signature");
+  const started = await getCreate(createId);
+  if (!started && !SANDBOX) throw new FlowError(404, "UNKNOWN_CREATE", "Pot didn't start this creation. Tap Create again.");
+  if (started && started.draft_id !== draftId) throw new FlowError(403, "WRONG_DRAFT", "This creation belongs to a different draft.");
+  if (row.status === "created") throw new FlowError(409, "ALREADY_CREATED", "This market was already created");
   const r = await pantaPost<{ marketId: string; status: string }>("/markets/register/", { createId, signature });
   await updateDraft(draftId, { status: "created", market_id: r.marketId, create_signature: signature });
   await linkGroupMarket(row.chat_id, r.marketId, { createdByGroup: true, draftId, creatorWallet: row.creator_wallet ?? undefined });
@@ -209,4 +238,15 @@ export function confirmClaimPractice(kind: "win" | "creator", wallet: string, ma
 async function nameClaimFor(inserted: boolean, signature: string, wallet: string): Promise<string | null> {
   if (!inserted || (await walletLinked(wallet))) return null;
   return createNameClaim(signature, wallet);
+}
+
+export const isAlreadySubmitted = (e: PantaError) => e.status === 409 || /ALREADY|DUPLICATE_(ORDER|SUBMIT)|SUBMITTED/i.test(e.code);
+
+/** Panta's create quote must charge exactly Pot's advertised fee for this market type. Returns the fee in USDC. */
+export function checkCreateQuote(q: { paymentUsdc: string | number; marketType?: string }, draft: Pick<MarketDraft, "marketType">): number {
+  const fee = Number(q.paymentUsdc) / 1e6;
+  const expected = LIMITS.fees[draft.marketType];
+  if (q.marketType && q.marketType !== draft.marketType) throw new FlowError(409, "FEE_MISMATCH", `Panta priced this as a ${q.marketType} market, not ${draft.marketType}. Nothing was charged; re-open the draft.`);
+  if (!(Math.abs(fee - expected) < 0.005)) throw new FlowError(409, "FEE_MISMATCH", `Panta quoted $${fee.toFixed(2)} but Pot shows $${expected}. Nothing was charged; try again later.`);
+  return fee;
 }

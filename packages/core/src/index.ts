@@ -11,3 +11,4 @@ export * from "./actions";
 export * from "./practice";
 export * from "./deadline";
 export * from "./receipt";
+export * from "./walleterr";

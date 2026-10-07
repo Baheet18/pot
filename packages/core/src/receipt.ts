@@ -124,3 +124,16 @@ export function formatReceiptHtml(r: Receipt, opts: { maxPeople?: number } = {})
     : `<i>≈ approx, using Panta's payout rules. Practice money only: nothing to claim. (Live markets also charge a 2% trading fee per buy.)</i>`);
   return lines.join("\n");
 }
+
+/** Panta's dispute window after a result is posted. */
+export const DISPUTE_WINDOW_SEC = 3600;
+/**
+ * Real-money markets: wait out the dispute window before posting a receipt, so a group never sees a result that later flips.
+ * Practice markets (settled by /settle) post at once.
+ */
+export function receiptDue(m: { isResolved: boolean; resolvedAt: number | null; resolutionTime: number }, nowSec: number, live: boolean): boolean {
+  if (!m.isResolved) return false;
+  if (!live) return true;
+  const at = m.resolvedAt ?? m.resolutionTime;
+  return !at || nowSec >= at + DISPUTE_WINDOW_SEC;
+}

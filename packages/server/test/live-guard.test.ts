@@ -19,3 +19,13 @@ describe("practice signatures in live mode", () => {
     expect(() => vp({ message: "x", signature: "x", wallet: "x", action: "buy", marketId: "x", ref: "x" })).toThrow(/only accepted in test mode/);
   });
 });
+
+import { finishBuy as fb, setFundsReader } from "../src";
+describe("live hardening without approval", () => {
+  it("refuses to finish an order Pot never quoted (no client-made orders)", async () => {
+    await expect(fb({ orderId: "ord_made_up", signature: "5".repeat(88), wallet: "BSCDDRaVGiLJERmoNWTgAGcend9FUUhXEHnLFTqZHDxW", marketId: "x", side: "yes", amountUsdc: 1, channel: "web" }))
+      .rejects.toMatchObject({ code: "UNKNOWN_ORDER" });
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+  });
+  it("funds reader is injectable (tests never hit mainnet RPC)", () => { setFundsReader(async () => ({ sol: 1, usdc: 1 })); setFundsReader(null); });
+});

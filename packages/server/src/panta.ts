@@ -126,10 +126,36 @@ export async function pantaPost<T = Record<string, unknown>>(p: WritePath, body:
       return send(attempt + 1);
     }
     const b = await parse(res);
-    if (!res.ok) throw new PantaError(res.status, b?.code ?? `HTTP_${res.status}`, b?.message ?? b?.detail ?? `Panta POST ${p} failed (${res.status})`, b);
+    if (!res.ok) {
+      const code = b?.code ?? `HTTP_${res.status}`;
+      throw new PantaError(res.status, code, friendlyPantaMessage(code, b?.message ?? b?.detail, res.status), b);
+    }
     return b as T;
   };
   return send(0);
+}
+
+/**
+ * Plain-words messages for Panta error codes (seen on the live API: NOT_CLAIMABLE, NOT_MARKET_CREATOR, DUPLICATE_MARKET come
+ * with no message). Unknown codes keep Panta's own message.
+ */
+const FRIENDLY: Array<[RegExp, string]> = [
+  [/INSUFFICIENT.*(USDC|FUNDS|BALANCE)|NOT_ENOUGH_USDC/i, "Not enough USDC in this wallet for that amount plus Panta's 2% fee. Top up USDC (Solana) and try again."],
+  [/INSUFFICIENT.*SOL|NOT_ENOUGH_SOL|LAMPORTS/i, "Not enough SOL for Solana network fees. Add about 0.01 SOL to the wallet and try again."],
+  [/QUOTE.*EXPIRED|EXPIRED|BLOCKHASH/i, "That quote expired. Get a fresh quote and sign again."],
+  [/SLIPPAGE|PRICE_MOVED/i, "The price moved while you were signing. Get a fresh quote."],
+  [/NOT_PRIMARY|NOT_BUYABLE|PRIMARY.*(ENDED|CLOSED)|MARKET_CLOSED/i, "Buying has closed on this market."],
+  [/NOT_CLAIMABLE/i, "Nothing to claim for this wallet on this market (yet). Winnings unlock after the result and Panta's 1-hour dispute window."],
+  [/NOT_MARKET_CREATOR/i, "This wallet isn't the creator of this market, so there's no royalty to claim. Use the wallet that paid the creation fee."],
+  [/DUPLICATE_MARKET/i, "A creation for this question is already in progress from this wallet. Wait a few minutes for it to expire, or change the question."],
+  [/RATE|THROTTL|TOO_MANY/i, "Panta is busy right now. Try again in a minute."],
+  [/UNAUTHORI|FORBIDDEN|API_KEY/i, "Pot couldn't talk to Panta (API key problem). The admin needs to check the setup."],
+];
+export function friendlyPantaMessage(code: string, message: string | undefined, status: number): string {
+  const hit = FRIENDLY.find(([re]) => re.test(code) || (message ? re.test(message) : false));
+  if (hit) return hit[1];
+  if (message) return message;
+  return status >= 500 ? "Panta is having trouble right now. Nothing was charged. Try again in a minute." : `Panta refused the request (${code}).`;
 }
 
 // ---------------------------------------------------------------- reads

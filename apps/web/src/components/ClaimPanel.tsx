@@ -1,4 +1,5 @@
 "use client";
+import { friendlyWalletError } from "@pot/core/src/walleterr";
 import { useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -29,7 +30,7 @@ function Inner({ marketId, kind, sandbox, liveWrites }: { marketId: string; kind
       const sig = await signSendConfirm(connection, b.transaction, signTransaction);
       if (kind === "win") await api("/api/pot/claim/report", { marketId, wallet: publicKey.toBase58(), signature: sig }).catch(() => undefined);
       setMsg(`✅ Claimed. Signature ${sig}`);
-    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setMsg(friendlyWalletError(e)); } finally { setBusy(false); }
   }
   return (
     <div className="space-y-3">

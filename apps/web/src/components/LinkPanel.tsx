@@ -1,4 +1,5 @@
 "use client";
+import { friendlyWalletError } from "@pot/core/src/walleterr";
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -18,7 +19,7 @@ function Inner({ token, message }: { token: string; message: (w: string) => stri
       const sig = await signMessage(new TextEncoder().encode(text));
       await api("/api/pot/link", { token, wallet: publicKey.toBase58(), signature: bs58.encode(sig) });
       setMsg("✅ Linked. Go back to Telegram and send /mine.");
-    } catch (e) { setMsg((e as Error).message); }
+    } catch (e) { setMsg(friendlyWalletError(e)); }
   }
   return (
     <div className="space-y-3">
