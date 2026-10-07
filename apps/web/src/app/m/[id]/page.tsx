@@ -84,7 +84,7 @@ export default async function MarketPage({ params, searchParams }: Props) {
           <div data-testid="receipt" className="card space-y-3 p-5 text-sm">
             <h2 className="font-bold">🧾 Receipt</h2>
             {receipt.oneSided && <p data-testid="one-sided" className="rounded-lg bg-white/5 p-3 text-stone-200">{receipt.oneSided === receipt.outcome
-              ? <>🤝 Everyone picked {receipt.outcome.toUpperCase()}, so there was no losing side. Panta doesn&apos;t refund: the creator&apos;s cut drops to 0% and the {receipt.outcome.toUpperCase()} side splits the whole pot by shares, so everyone gets money back (earlier buyers got cheaper shares, so amounts differ a bit from stakes). Not counted as a win or a loss.</>
+              ? <>🤝 Everyone picked {receipt.outcome.toUpperCase()}, so there was no losing side. Panta doesn&apos;t refund: the creator&apos;s cut drops to 0% and the {receipt.outcome.toUpperCase()} side splits the whole pot by shares, so everyone gets money back (earlier buyers got cheaper shares, so what each gets back can differ from their stake). Not counted as a win or a loss.</>
               : <>Everyone picked {receipt.oneSided.toUpperCase()} and it resolved {receipt.outcome.toUpperCase()}, so every stake was lost.</>}</p>}
             {receipt.people.length === 0 ? <p className="text-stone-400">No buys through Pot on this market.</p> : (
               <div className="overflow-x-auto">

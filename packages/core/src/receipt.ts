@@ -116,8 +116,9 @@ export function formatReceiptHtml(r: Receipt, opts: { maxPeople?: number } = {})
   if (r.people.length > max) lines.push(`…and ${r.people.length - max} more`);
   if (r.others.people) lines.push(`+ ${r.others.people} buyer${r.others.people === 1 ? "" : "s"} from outside this group (${money(r.others.stake)})`);
   lines.push(RULE);
-  if (even) lines.push(`<i>Panta doesn't refund one-sided markets: the creator's cut drops to 0% and the ${side} side splits the whole pot by shares. Earlier buyers got cheaper shares, so amounts differ a bit from stakes. Nobody was on the other side, so this isn't counted as a win or a loss. ≈ approx.</i>`);
+  if (even) lines.push(`<i>Panta doesn't refund one-sided markets: the creator's cut drops to 0% and the ${side} side splits the whole pot by shares. Earlier buyers got cheaper shares, so what each gets back can differ from their stake. Nobody was on the other side, so this isn't counted as a win or a loss.</i>`);
   if (!even && r.people.some((x) => x.won && x.net < 0)) lines.push("<i>✅ = right side but still down: they bought when that side was already pricey.</i>");
+  if (r.people.some((x) => /…/.test(x.name) && x.name.length <= 9)) lines.push("<i>Showing a wallet instead of a name? That buy came from the website without a linked Telegram account. DM me /link from that wallet and the name appears here.</i>");
   lines.push(r.feeRate > 0
     ? `<i>≈ approx. Net includes Panta's ${Math.round(r.feeRate * 100)}% trading fee. Panta sets final payouts after its 1-hour dispute window. Winners: DM me /mine to claim.</i>`
     : `<i>≈ approx, using Panta's payout rules. Practice money only: nothing to claim. (Live markets also charge a 2% trading fee per buy.)</i>`);
