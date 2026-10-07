@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { fmtTime, fmtUsd } from "@pot/core";
-import { getMarketView, type MarketView } from "@pot/server";
+import { buildReceipt, getMarketView, type MarketView } from "@pot/server";
+import type { Receipt } from "@pot/core";
 
 /** Open Graph / X card image (1200×630) and square Blink icon (?sq=1, 800×800) for a market. No emoji (no network fonts). */
 const HEADERS = { "cache-control": "public, max-age=120, s-maxage=120, stale-while-revalidate=600" };
@@ -10,8 +11,9 @@ export async function GET(req: Request, { params }: Ctx) {
   const { id } = await params;
   const sq = new URL(req.url).searchParams.get("sq") === "1";
   const v = await getMarketView(id).catch(() => null);
+  const receipt = v?.market.isResolved ? await buildReceipt(v).catch(() => null) : null;
   const size = sq ? { width: 800, height: 800 } : { width: 1200, height: 630 };
-  return new ImageResponse(v ? <MarketImage v={v} sq={sq} /> : <Fallback />, { ...size, headers: HEADERS });
+  return new ImageResponse(v ? <MarketImage v={v} sq={sq} receipt={receipt} /> : <Fallback />, { ...size, headers: HEADERS });
 }
 
 function Fallback() {
@@ -23,7 +25,8 @@ function Fallback() {
   );
 }
 
-function MarketImage({ v, sq }: { v: MarketView; sq: boolean }) {
+function MarketImage({ v, sq, receipt }: { v: MarketView; sq: boolean; receipt: Receipt | null }) {
+  const even = !!receipt?.oneSided && receipt.oneSided === receipt.outcome;
   const m = v.market;
   const ys = v.stats.yesSplit;
   const y = ys === null ? 50 : Math.round(ys * 100);
@@ -55,7 +58,7 @@ function MarketImage({ v, sq }: { v: MarketView; sq: boolean }) {
         <div style={{ display: "flex", color: "#fb7185" }}>{ys === null ? "NO —" : `NO ${100 - y}%`}</div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 22, fontSize: 22, color: "#a8a29e" }}>
-        <div style={{ display: "flex" }}>{m.isResolved ? "Settled" : v.buyable ? `Buying closes ${fmtTime(closes)}` : "Buying closed"}</div>
+        <div style={{ display: "flex" }}>{m.isResolved ? (even ? `Everyone picked ${receipt!.outcome.toUpperCase()}: no losing side, money back` : "Settled") : v.buyable ? `Buying closes ${fmtTime(closes)}` : "Buying closed"}</div>
         <div style={{ display: "flex" }}>Powered by Panta</div>
       </div>
     </div>

@@ -33,6 +33,8 @@ const SCHEMA = [
     shares DOUBLE PRECISION NOT NULL, created_ms BIGINT NOT NULL, PRIMARY KEY (signature, mode))`,
   `CREATE TABLE IF NOT EXISTS practice_results (
     id TEXT NOT NULL, mode TEXT NOT NULL, outcome TEXT NOT NULL, settled_by BIGINT, settled_at BIGINT NOT NULL, PRIMARY KEY (id, mode))`,
+  `CREATE TABLE IF NOT EXISTS name_claims (
+    id TEXT PRIMARY KEY, mode TEXT NOT NULL, signature TEXT NOT NULL, wallet TEXT NOT NULL, created_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS draft_choices (
     id TEXT PRIMARY KEY, mode TEXT NOT NULL, chat_id BIGINT NOT NULL, admin_id BIGINT NOT NULL, payload_json TEXT NOT NULL, created_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS receipts (
@@ -141,7 +143,7 @@ export async function recordBuy(b: BuyInput): Promise<{ inserted: boolean; newTo
     [b.signature, MODE, b.marketId, b.wallet, b.side, b.amountUsdc, b.ref, b.pantaUserId, b.chatId, b.sharerTgId, b.sharerX, b.newToPanta ? 1 : 0, seen ? 0 : 1, b.pantaStatus, b.attributed ? 1 : 0, b.channel, now()]);
   return { inserted: r.changes > 0, newToPot: !seen };
 }
-export interface BuyRow { signature: string; market_id: string; wallet: string; side: string; amount_usdc: number; ref: string; chat_id: number | null; sharer_tg_id: number | null; new_to_panta: number; new_to_pot: number; channel: string; created_at: number }
+export interface BuyRow { signature: string; market_id: string; wallet: string; side: string; amount_usdc: number; ref: string; chat_id: number | null; sharer_tg_id: number | null; tg_user_id?: number | null; new_to_panta: number; new_to_pot: number; channel: string; created_at: number }
 export async function unnotifiedBuys(): Promise<BuyRow[]> {
   return all<BuyRow>(`SELECT * FROM buys WHERE mode=? AND notified=0 AND chat_id IS NOT NULL ORDER BY created_at`, [MODE]);
 }
@@ -241,7 +243,7 @@ export async function buysForWallets(wallets: string[]): Promise<BuyRow[]> {
 /** Test-mode reset: removes every row for MODE='test' (never touches live rows). Returns rows deleted per table. */
 /** Real Telegram user ids are large; ids below this are fixtures from scripts/tests. */
 const FAKE_TG_ID_MAX = 100000;
-const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades", "practice_results", "receipts", "draft_choices"] as const;
+const WIPE_TABLES = ["buys", "drafts", "group_markets", "chat_groups", "practice_markets", "practice_trades", "practice_results", "receipts", "draft_choices", "name_claims"] as const;
 /** Counts of test-mode rows (what wipeTestData would remove). */
 export async function testDataSummary(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -354,4 +356,36 @@ export async function getChoice(id: string): Promise<DraftChoice | null> {
 }
 export async function updateChoice(c: DraftChoice) {
   await run(`UPDATE draft_choices SET payload_json=? WHERE id=? AND mode=?`, [JSON.stringify({ question: c.question, options: c.options, rephrase: c.rephrase }), c.id, MODE]);
+}
+
+// ---------------------------------------------------------------- buyer names for web/Blink buys
+/** Is this wallet linked to any Telegram user? */
+export async function walletLinked(wallet: string): Promise<boolean> {
+  return !!(await one(`SELECT 1 AS x FROM wallet_links WHERE wallet=? AND mode=? LIMIT 1`, [wallet, MODE]));
+}
+/**
+ * A buy made on the website/Blink doesn't tell us who the buyer is on Telegram. The buyer's browser gets a short
+ * one-time id; opening t.me/<bot>?start=n_<id> proves the Telegram side, and the buy signature proved the wallet.
+ */
+export async function createNameClaim(signature: string, wallet: string): Promise<string> {
+  const id = newId("n");
+  await run(`INSERT INTO name_claims (id, mode, signature, wallet, created_at) VALUES (?,?,?,?,?)`, [id, MODE, signature, wallet, now()]);
+  return id;
+}
+/** Uses a name claim: tags the buy with the Telegram user and links the wallet (if it isn't linked yet). One use, 7 days. */
+export async function consumeNameClaim(id: string, tgUserId: number): Promise<{ wallet: string; marketId: string | null } | null> {
+  const c = await one<{ signature: string; wallet: string; created_at: number }>(`SELECT signature, wallet, created_at FROM name_claims WHERE id=? AND mode=?`, [id, MODE]);
+  if (!c || now() - Number(c.created_at) > 7 * 86400) return null;
+  if ((await run(`DELETE FROM name_claims WHERE id=? AND mode=?`, [id, MODE])).changes === 0) return null;
+  await run(`UPDATE buys SET tg_user_id=? WHERE signature=? AND mode=? AND tg_user_id IS NULL`, [tgUserId, c.signature, MODE]);
+  if (!(await walletLinked(c.wallet))) await linkWallet(tgUserId, c.wallet);
+  const b = await one<{ market_id: string }>(`SELECT market_id FROM buys WHERE signature=? AND mode=?`, [c.signature, MODE]);
+  return { wallet: c.wallet, marketId: b?.market_id ?? null };
+}
+/** Telegram names for buys that carry the buyer's Telegram id (signature → name). */
+export async function buyerNames(signatures: string[]): Promise<Map<string, string>> {
+  if (!signatures.length) return new Map();
+  const rows = await all<{ signature: string; name: string }>(`SELECT b.signature, m.name FROM buys b JOIN members m ON m.tg_user_id=b.tg_user_id
+    WHERE b.mode=? AND b.signature IN (${signatures.map(() => "?").join(",")})`, [MODE, ...signatures]);
+  return new Map(rows.map((r) => [r.signature, r.name]));
 }

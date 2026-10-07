@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { getMarketView } from "./views";
 import { getWalletTrades, invalidate, pantaPost, PantaError } from "./panta";
 import { compileTx, isSandboxSignature, isSignature, isWallet, isMarketId, type PantaIx } from "./tx";
-import { getDraft, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft } from "./store";
+import { createNameClaim, getDraft, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft, walletLinked } from "./store";
 import { refIsTrusted } from "./tokens";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
 import { newPracticeMessage, verifyPractice } from "./practice";
@@ -115,7 +115,7 @@ export async function finishBuy(input: {
       })
     : { inserted: false, newToPot: false };
   invalidate(`/markets/${marketId}/`);
-  return { status, attributed, newToPanta, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: SANDBOX };
+  return { status, attributed, newToPanta, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: SANDBOX, nameClaim: await nameClaimFor(rec.inserted, signature, wallet) };
 }
 
 // ---------------------------------------------------------------- create market (admin signs + pays)
@@ -189,7 +189,7 @@ export async function finishBuyPractice(input: Omit<Parameters<typeof finishBuy>
     newToPanta: false, pantaStatus: "practice", attributed: parsed.kind !== "web", channel: input.channel,
   });
   if (rec.inserted) await insertPracticeTrade({ signature, marketId: input.marketId, wallet: input.wallet, side: input.side, amountUsdc: amount, shares: quotePractice(st.pool, input.side, amount).shares });
-  return { status: "confirmed", attributed: parsed.kind !== "web", newToPanta: false, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: true, practice: true };
+  return { status: "confirmed", attributed: parsed.kind !== "web", newToPanta: false, newToPot: rec.newToPot, recorded: rec.inserted, sandbox: true, practice: true, nameClaim: await nameClaimFor(rec.inserted, signature, input.wallet) };
 }
 export async function finishCreatePractice(draftId: string, createId: string, wallet: string, practiceMessage: string, practiceSignature: string) {
   const row = await getDraft(draftId);
@@ -203,4 +203,10 @@ export async function finishCreatePractice(draftId: string, createId: string, wa
 export function confirmClaimPractice(kind: "win" | "creator", wallet: string, marketId: string, practiceMessage: string, practiceSignature: string) {
   const signature = verifyPractice({ message: practiceMessage, signature: practiceSignature, wallet, action: "claim", marketId, ref: `claim:${kind}` });
   return { claimed: true, practice: true, signature };
+}
+
+/** Web/Blink buys from a wallet we can't tie to a Telegram user get a one-time "put my name on it" id. */
+async function nameClaimFor(inserted: boolean, signature: string, wallet: string): Promise<string | null> {
+  if (!inserted || (await walletLinked(wallet))) return null;
+  return createNameClaim(signature, wallet);
 }

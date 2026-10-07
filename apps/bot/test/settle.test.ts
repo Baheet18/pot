@@ -186,6 +186,76 @@ describe("settlement receipts (practice markets)", () => {
     await expect(startBuy({ marketId: id, side: "yes", amountUsdc: 5, wallet: w, ref, rs: signRef(ref) })).rejects.toThrow();
   });
 
+  it("one-sided market (everyone YES, resolves YES): no gains or losses, 0% creator cut, about stakes back; /mine says not a win or loss", async () => {
+    const id = await practiceMarket();
+    const ada = Keypair.generate(), tolu = Keypair.generate();
+    await upsertMember(42, "Ada"); await linkWallet(42, ada.publicKey.toBase58());
+    await upsertMember(43, "@tolu"); await linkWallet(43, tolu.publicKey.toBase58());
+    await buy(id, ada, "yes", 20);
+    await buy(id, tolu, "yes", 15);
+    afterKickoff();
+    const b = makeBot();
+    await b.msg("/settle yes");
+    const text: string = b.replies().find((p) => p.text.includes("RECEIPT")).text;
+    expect(text).toContain("🤝 Everyone picked YES, so there was no losing side.");
+    expect(text).toContain("Creator royalty (0%): $0.00");
+    expect(text).toMatch(/🤝 Ada · YES \$20\.00 → ≈\$\d+\.\d\d back/);
+    expect(text).toMatch(/🤝 @tolu · YES \$15\.00 → ≈\$\d+\.\d\d back/);
+    expect(text).not.toMatch(/🏆|💸|✅ =|\(≈?[+−]/);
+    expect(text).toContain("Panta doesn't refund one-sided markets");
+    const r = await buildReceipt(await getMarketView(id));
+    expect(r.oneSided).toBe("yes");
+    expect(r.people.every((x) => x.result === "even")).toBe(true);
+    // Panta: no refund, 0% creator cut, the whole pot is split over YES shares (the seed's YES shares included).
+    expect(r.royaltyUsdc).toBe(0);
+    expect(r.winnerPoolUsdc).toBeCloseTo(r.potUsdc, 6);
+    const paid = r.people.reduce((a, x) => a + x.payout, 0);
+    expect(paid).toBeLessThanOrEqual(r.potUsdc + 1e-6);
+    expect(paid).toBeGreaterThan(35 * 0.9);
+    await b.msg("/mine", MEMBER, { id: 42, type: "private", first_name: "Ada" });
+    expect(b.replies().at(-1).text).toMatch(/no losing side: about \$\d+\.\d\d back \(not a win or a loss\)/);
+  });
+
+  it("one-sided market that goes against the crowd: everyone loses, said plainly", async () => {
+    const id = await practiceMarket();
+    await buy(id, Keypair.generate(), "yes", 10);
+    await buy(id, Keypair.generate(), "yes", 5);
+    afterKickoff();
+    await settlePracticeMarket(id, "no", 7);
+    const r = await buildReceipt(await getMarketView(id));
+    expect(r.people.every((x) => x.result === "lost" && x.payout === 0)).toBe(true);
+    const { formatReceiptHtml } = await import("@pot/core");
+    expect(formatReceiptHtml(r)).toContain("Everyone picked YES and it resolved NO, so every stake was lost.");
+  });
+
+  it("a website buy from an unknown wallet gets a 'show my Telegram name' link; using it names the buyer and re-renders the posted receipt", async () => {
+    const id = await practiceMarket();
+    const ada = Keypair.generate();
+    await upsertMember(42, "Ada"); await linkWallet(42, ada.publicKey.toBase58());
+    await buy(id, ada, "yes", 20);
+    const stranger = Keypair.generate();
+    const f = await buy(id, stranger, "no", 10);
+    expect(f.nameClaim).toMatch(/^n_[\w-]+$/);
+    expect((await buy(id, ada, "yes", 1)).nameClaim).toBeNull(); // linked wallets don't need one
+    afterKickoff();
+    const b = makeBot();
+    await b.msg("/settle yes");
+    const first = b.replies().find((p) => p.text.includes("RECEIPT"));
+    expect(first.text).toMatch(/💸 \w{4}…\w{4} · NO/);
+    const dm = { id: 77, type: "private", first_name: "Bolu" };
+    await b.msg(`/start ${f.nameClaim}`, { id: 77, is_bot: false, first_name: "Bolu", username: "bolu_x" }, dm);
+    expect(b.replies().at(-1).text).toMatch(/Your buy now shows as <b>@bolu_x<\/b>/);
+    const edit = b.sent.filter((x) => x.method === "editMessageText").at(-1)!;
+    expect(edit.payload.text).toMatch(/💸 @bolu_x · NO \$10\.00/);
+    expect(edit.payload.chat_id).toBe(GROUP.id);
+    expect(edit.payload.message_id).toBe(101 + b.replies().indexOf(first));
+    const r = await buildReceipt(await getMarketView(id));
+    expect(r.people.map((x) => x.name).sort()).toEqual(["@bolu_x", "Ada"]);
+    // One use only.
+    await b.msg(`/start ${f.nameClaim}`, { id: 78, is_bot: false, first_name: "Eve" }, { id: 78, type: "private", first_name: "Eve" });
+    expect(b.replies().at(-1).text).toMatch(/already used or has expired/);
+  });
+
   it("a group receipt lists only that group's buyers and sums up the rest", async () => {
     const id = await practiceMarket();
     await upsertGroup(OTHER.id, OTHER.title);

@@ -83,17 +83,20 @@ export default async function MarketPage({ params, searchParams }: Props) {
         {receipt && (
           <div data-testid="receipt" className="card space-y-3 p-5 text-sm">
             <h2 className="font-bold">🧾 Receipt</h2>
+            {receipt.oneSided && <p data-testid="one-sided" className="rounded-lg bg-white/5 p-3 text-stone-200">{receipt.oneSided === receipt.outcome
+              ? <>🤝 Everyone picked {receipt.outcome.toUpperCase()}, so there was no losing side. Panta doesn&apos;t refund: the creator&apos;s cut drops to 0% and the {receipt.outcome.toUpperCase()} side splits the whole pot by shares, so everyone gets money back (earlier buyers got cheaper shares, so amounts differ a bit from stakes). Not counted as a win or a loss.</>
+              : <>Everyone picked {receipt.oneSided.toUpperCase()} and it resolved {receipt.outcome.toUpperCase()}, so every stake was lost.</>}</p>}
             {receipt.people.length === 0 ? <p className="text-stone-400">No buys through Pot on this market.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
-                  <thead className="text-xs text-stone-400"><tr><th className="py-1 pr-2">Who</th><th className="pr-2">Side</th><th className="pr-2 text-right">Stake</th><th className="pr-2 text-right">Payout</th><th className="text-right">Net</th></tr></thead>
+                  <thead className="text-xs text-stone-400"><tr><th className="py-1 pr-2">Who</th><th className="pr-2">Side</th><th className="pr-2 text-right">Stake</th><th className="pr-2 text-right">Payout</th><th className="text-right">{receipt.oneSided === receipt.outcome ? "" : "Net"}</th></tr></thead>
                   <tbody>{receipt.people.map((x) => (
                     <tr key={x.wallet} className="border-t border-white/10">
-                      <td className="py-1.5 pr-2">{x.won ? (x.net >= 0 ? "🏆" : "✅") : "💸"} {x.name}</td>
+                      <td className="py-1.5 pr-2">{x.result === "even" ? "🤝" : x.won ? (x.net >= 0 ? "🏆" : "✅") : "💸"} {x.name}</td>
                       <td className="pr-2">{x.sides.map((s) => s.toUpperCase()).join("+")}</td>
                       <td className="pr-2 text-right">${x.stake.toFixed(2)}</td>
-                      <td className="pr-2 text-right">{x.won ? `≈$${x.payout.toFixed(2)}` : "$0"}</td>
-                      <td className={`text-right font-semibold ${x.net >= 0 ? "text-emerald-300" : "text-rose-300"}`}>{x.net >= 0 ? "+" : "−"}${Math.abs(x.net).toFixed(2)}</td>
+                      <td className="pr-2 text-right">{x.won || x.result === "even" ? `≈$${x.payout.toFixed(2)}` : "$0"}</td>
+                      {x.result === "even" ? <td className="text-right text-stone-300">back</td> : <td className={`text-right font-semibold ${x.net >= 0 ? "text-emerald-300" : "text-rose-300"}`}>{x.net >= 0 ? "+" : "−"}${Math.abs(x.net).toFixed(2)}</td>}
                     </tr>
                   ))}</tbody>
                 </table>

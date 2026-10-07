@@ -4,7 +4,7 @@ import { esc, findDeadline, fmtWat, formatReceiptHtml, renderCard, validateDraft
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
-  walletsFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
+  walletsFor, consumeNameClaim, receiptFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
 /**
@@ -155,6 +155,14 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
   bot.command(["start", "help"], async (ctx) => {
     const payload = ctx.match?.toString().trim();
     if (payload === "link" && ctx.from) return sendLink(ctx);
+    if (payload?.startsWith("n_") && ctx.from && !isGroup(ctx)) {
+      // "Put my Telegram name on it" after a website/Blink buy.
+      const c = await consumeNameClaim(payload, ctx.from.id);
+      if (!c) return ctx.reply("That link was already used or has expired. You can still link your wallet with /link.");
+      const name = ctx.from.username ? `@${ctx.from.username}` : [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ");
+      if (c.marketId) await rerenderReceipts(ctx.api, c.marketId).catch(() => undefined);
+      return ctx.reply(`✅ Done. Your buy now shows as <b>${esc(name)}</b> in group alerts and receipts, and wallet ${shortW(c.wallet)} is linked, so /mine shows your positions.`, { parse_mode: "HTML" });
+    }
     if (payload?.startsWith("m_") && isMarketId(payload.slice(2))) return sendCard(ctx, payload.slice(2), memberRef(ctx));
     await ctx.reply(help + SANDBOX_NOTE, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
   });
@@ -392,7 +400,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       for (const p of (pos ?? []).slice(0, 15)) {
         out.push("", `• <b>${p.side.toUpperCase()} ${usd(p.amountUsdc)}</b> on ${esc(p.title)}`,
           p.result
-            ? `   Result ${p.result.toUpperCase()}: ${p.result === p.side ? `✅ won, pays about ${usd(p.payout)}` : "❌ lost"}`
+            ? `   Result ${p.result.toUpperCase()}: ${p.outcome === "even" ? `🤝 everyone picked ${p.side.toUpperCase()}, so no losing side: about ${usd(p.payout)} back (not a win or a loss)` : p.outcome === "won" ? `✅ won, pays about ${usd(p.payout)}` : "❌ lost"}`
             : `   ${p.shares.toFixed(2)} shares · pays about ${usd(p.paysIfWin)} if ${p.side.toUpperCase()} wins`,
           `   ${p.result ? "Settled" : p.open ? `Buying open until ${fmtWat(p.closes)}` : "Buying closed, waiting for the result"} · ${esc(`${WEB_URL}/m/${p.marketId}`)}`);
       }
@@ -540,6 +548,27 @@ export async function postReceipt(api: Bot["api"], chatId: number, view: MarketV
     console.error("[bot] receipt failed:", safeErr(e));
     return "failed";
   }
+}
+
+/** Re-renders already-posted receipts for a market (e.g. after a buyer's name became known, or a format fix). */
+export async function rerenderReceipts(api: Bot["api"], marketId: string): Promise<number> {
+  const view = await getMarketView(marketId);
+  if (!view.market.isResolved) return 0;
+  let n = 0;
+  for (const g of await groupsForMarket(marketId)) {
+    const chatId = Number(g.chat_id);
+    const r = await receiptFor(marketId, chatId);
+    if (!r?.message_id) continue;
+    const text = formatReceiptHtml(await buildReceipt(view, { chatId }));
+    const kb = isPublicHttps() ? new InlineKeyboard().url("Full receipt", marketUrl(marketId, { kind: "group", chatId })) : undefined;
+    try {
+      await api.editMessageText(chatId, Number(r.message_id), text, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+      n++;
+    } catch (e) {
+      if (!/not modified/i.test(String((e as Error).message))) console.error("[bot] receipt re-render failed:", safeErr(e));
+    }
+  }
+  return n;
 }
 
 export async function settleTick(bot: Bot) {

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import bs58 from "bs58";
 import { MARKET_CONFIG, type MarketDraft, type RawDetail, type RawTrade } from "@pot/core";
-import { buysForWallets, getDraft, getPracticeMarket, getPracticeResult, insertPracticeResult, type PracticeResultRow, insertPracticeMarket, linkGroupMarket, listPracticeMarkets, practiceTrades, updateDraft, type PracticeMarketRow, type PracticeTradeRow } from "./store";
+import { buysForMarket, buysForWallets, getDraft, getPracticeMarket, getPracticeResult, insertPracticeResult, type PracticeResultRow, insertPracticeMarket, linkGroupMarket, listPracticeMarkets, practiceTrades, updateDraft, type PracticeMarketRow, type PracticeTradeRow } from "./store";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
 
 /**
@@ -115,13 +115,16 @@ export { listPracticeMarkets };
 /** Test-mode positions for /mine: practice buys grouped by market and side, with the market's title and status. */
 export async function practicePositions(wallets: string[]) {
   const mine = await buysForWallets(wallets);
-  const out: Array<{ marketId: string; title: string; side: "yes" | "no"; amountUsdc: number; shares: number; paysIfWin: number; closes: number; open: boolean; wallet: string; result: "yes" | "no" | null; payout: number }> = [];
+  const out: Array<{ marketId: string; title: string; side: "yes" | "no"; amountUsdc: number; shares: number; paysIfWin: number; closes: number; open: boolean; wallet: string; result: "yes" | "no" | null; payout: number; outcome: "won" | "lost" | "even" | null }> = [];
   const now = Math.floor(Date.now() / 1000);
   for (const id of [...new Set(mine.map((b) => b.market_id))]) {
     const st = await practiceState(id);
     if (!st) continue;
     const { getMarketView } = await import("./views");
     const view = await getMarketView(id).catch(() => null);
+    const all = st.result ? await buysForMarket(id) : [];
+    const sides = new Set(all.map((b) => b.side));
+    const crowd = sides.size === 1 ? [...sides][0] : null;
     for (const side of ["yes", "no"] as const) {
       const rows = mine.filter((b) => b.market_id === id && b.side === side);
       if (!rows.length) continue;
@@ -132,7 +135,9 @@ export async function practicePositions(wallets: string[]) {
         amountUsdc: rows.reduce((a, b) => a + Number(b.amount_usdc), 0),
         shares, paysIfWin: per ? shares * per : 0,
         closes: st.row.draft.startTime, open: !st.result && now < st.row.draft.startTime,
-        result: st.result?.outcome ?? null, payout: st.result ? (st.result.outcome === side && per ? shares * per : 0) : 0,
+        result: st.result?.outcome ?? null,
+        outcome: !st.result ? null : crowd === st.result.outcome ? "even" : st.result.outcome === side ? "won" : "lost",
+        payout: st.result ? (st.result.outcome === side && per ? shares * per : 0) : 0,
       });
     }
   }

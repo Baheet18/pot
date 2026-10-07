@@ -11,7 +11,7 @@ import bs58 from "bs58";
 
 type Side = "yes" | "no";
 interface Start { orderId: string; quoteId: string; side: Side; amountUsdc: number; shares: number; feeUsdc: number; paysAboutIfRight: number | null; transaction: string; practiceMessage: string | null; sandbox: boolean }
-interface Finish { status: string; attributed: boolean; newToPanta: boolean; newToPot: boolean; recorded: boolean }
+interface Finish { status: string; attributed: boolean; newToPanta: boolean; newToPot: boolean; recorded: boolean; nameClaim?: string | null }
 type Step = "idle" | "quoting" | "quoted" | "signing" | "finishing" | "done" | "error";
 
 export interface BuyPanelProps { marketId: string; initialSide?: Side; initialAmount?: number; refStr: string; rs: string | null; buyable: boolean; sandbox: boolean; liveWrites: boolean; rpc: string }
@@ -104,6 +104,7 @@ function Inner(p: BuyPanelProps) {
             <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">
               ✅ {p.sandbox ? "Practice buy recorded. No real money moved. The pot above now includes it." : `Bought! Panta status: ${res.status}.`} {res.attributed ? "Credited to your group/sharer." : ""} {res.newToPanta ? "🎉 Your first Panta trade." : ""}
               <div className="mt-1 break-all text-xs text-stone-400">Signature: {sig}</div>
+              {res.nameClaim && <a href={`https://t.me/pantapotbot?start=${res.nameClaim}`} target="_blank" rel="noopener noreferrer" data-testid="name-claim" className="mt-2 block rounded-lg bg-sky-500/20 px-3 py-2 text-center text-sky-100">Show my Telegram name on this buy ↗</a>}
             </div>
           )}
           {msg && <div className="text-sm text-rose-300">{msg}</div>}
