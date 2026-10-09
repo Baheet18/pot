@@ -29,3 +29,14 @@ describe("live hardening without approval", () => {
   });
   it("funds reader is injectable (tests never hit mainnet RPC)", () => { setFundsReader(async () => ({ sol: 1, usdc: 1 })); setFundsReader(null); });
 });
+
+import { checkPermissions } from "../src/secrets";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+describe("secret file permissions", () => {
+  const f = path.join(mkdtempSync(path.join(tmpdir(), "pot-perm-")), "k");
+  writeFileSync(f, "x"); chmodSync(f, 0o644);
+  it("refuse a group/world-readable file on POSIX", () => expect(() => checkPermissions(f, "Test key", "linux")).toThrow(/chmod 600/));
+  it("only warn on Windows, which has no POSIX modes", () => expect(() => checkPermissions(f, "Test key", "win32")).not.toThrow());
+});

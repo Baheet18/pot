@@ -13,7 +13,7 @@ const GROUP = { id: -100500, type: "supergroup" as const, title: "Naija Ballers"
 const ADMIN: U = { id: 7, is_bot: false, first_name: "Baheet", username: "baheet_" };
 const MEMBER: U = { id: 42, is_bot: false, first_name: "Ada" };
 
-function makeBot(adminIds: number[] = [7], drafter?: Drafter) {
+function makeBot(adminIds: number[] = [7], drafter?: Drafter, dmBlocked: number[] = []) {
   const sent: Sent[] = [];
   const bot = createBot("123456:TEST_TOKEN_NOT_REAL_xxxxxxxxxxxxxxxxxxxx", {
     drafter,
@@ -23,14 +23,15 @@ function makeBot(adminIds: number[] = [7], drafter?: Drafter) {
   bot.api.config.use(async (_prev, method, payload) => {
     sent.push({ method, payload });
     if (method === "getChatMember") return { ok: true, result: { status: adminIds.includes((payload as any).user_id) ? "administrator" : "member", user: {} } } as any;
+    if (method === "sendMessage" && dmBlocked.includes((payload as any).chat_id)) return { ok: false, error_code: 403, description: "Forbidden: bot can't initiate conversation with a user" } as any;
     if (method === "sendMessage") return { ok: true, result: { message_id: ++mid, date: 0, chat: { id: (payload as any).chat_id, type: "supergroup" }, text: (payload as any).text } } as any;
     return { ok: true, result: true } as any;
   });
   let uid = 1;
-  const msg = (text: string, from = ADMIN, chat: any = GROUP, replyTo?: number) => bot.handleUpdate({
+  const msg = (text: string, from = ADMIN, chat: any = GROUP, replyTo?: number, extra: Record<string, unknown> = {}) => bot.handleUpdate({
     update_id: uid++,
     message: {
-      message_id: uid, date: Math.floor(Date.now() / 1000), chat, from, text, entities: text.startsWith("/") ? [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] : [],
+      ...extra, message_id: uid, date: Math.floor(Date.now() / 1000), chat, from, text, entities: text.startsWith("/") ? [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] : [],
       ...(replyTo ? { reply_to_message: { message_id: replyTo, date: 0, chat, from: { id: 1, is_bot: true, first_name: "Pot" }, text: "draft" } } : {}),
     },
   } as any);
@@ -61,10 +62,70 @@ describe("Pot bot", () => {
     expect(b.sent.find((s) => s.method === "answerCallbackQuery")!.payload.text).toMatch(/Only the admin/);
 
     await b.tap(`create:${draftId}`);
-    const pay = b.replies().at(-1);
+    // The sign & pay link goes to the admin's DM only; the group just hears that it was sent.
+    const pay = b.replies().find((r) => r.chat_id === ADMIN.id)!;
     const url: string = pay.reply_markup.inline_keyboard[0][0].url;
     expect(url).toMatch(new RegExp(`^https://pot.example/create/${draftId}\\?t=`));
-    expect(verify<{ d: string }>(new URL(url).searchParams.get("t"))?.d).toBe(draftId);
+    expect(verify<{ d: string; u: number }>(new URL(url).searchParams.get("t"))).toMatchObject({ d: draftId, u: ADMIN.id });
+    const inGroup = b.replies().filter((r) => r.chat_id === GROUP.id).map((r) => JSON.stringify(r));
+    expect(inGroup.join(" ")).not.toContain("/create/");
+    expect(b.replies().at(-1).text).toMatch(/sent you the sign & pay link in a private message/);
+  });
+
+  it("if the bot can't DM the admin, it asks them to start the bot; /start c_<draft> in DM then sends the link (to that admin only)", async () => {
+    const b = makeBot([7, 42], undefined, [ADMIN.id]);
+    await b.msg("/new Will Super Eagles beat Ghana on Saturday 8pm?");
+    const draftId = b.replies()[0].reply_markup.inline_keyboard.flat().find((x: any) => x.text.startsWith("✅ Create")).callback_data.split(":")[1];
+    await b.tap(`create:${draftId}`);
+    const g = b.replies().at(-1);
+    expect(g.chat_id).toBe(GROUP.id);
+    expect(g.text).toMatch(/can't message you yet/);
+    expect(g.reply_markup.inline_keyboard[0][0].url).toBe(`https://t.me/pantapotbot?start=c_${draftId}`);
+    expect(JSON.stringify(b.replies().filter((r) => r.chat_id === GROUP.id))).not.toContain("/create/");
+    const b2 = makeBot([7, 42]);
+    await b2.msg(`/start c_${draftId}`, MEMBER, { id: 42, type: "private", first_name: "Ada" });
+    expect(b2.replies().at(-1).text).toMatch(/isn't yours/);
+    await b2.msg(`/start c_${draftId}`, ADMIN, { id: 7, type: "private", first_name: "Baheet" });
+    expect(b2.replies().at(-1).reply_markup.inline_keyboard[0][0].url).toContain(`/create/${draftId}?t=`);
+  });
+
+  it("anonymous admins (GroupAnonymousBot posting as the group) count as admins for /new, /admin and /settle", async () => {
+    const ANON = { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" };
+    const b = makeBot([7]);
+    const asGroup = { sender_chat: { id: GROUP.id, type: "supergroup", title: GROUP.title } };
+    await b.msg("/new Will Super Eagles beat Ghana on Saturday 8pm?", ANON as any, GROUP, undefined, asGroup);
+    expect(b.replies()[0].text).toContain("Market draft");
+    await b.msg("/admin", ANON as any, GROUP, undefined, asGroup);
+    expect(b.replies().at(-1).text).not.toMatch(/Only group admins/);
+    await b.msg("/settle yes", ANON as any, GROUP, undefined, asGroup);
+    expect(b.replies().at(-1).text).not.toMatch(/Only group admins/);
+    // A post "as some other channel" is not an admin.
+    await b.msg("/new Will it rain in Lagos tomorrow?", ANON as any, GROUP, undefined, { sender_chat: { id: -100999, type: "channel", title: "Other" } });
+    expect(b.replies().at(-1).text).toMatch(/Only group admins/);
+    // A real admin then taps Create on the anonymous draft and becomes its creator; a non-admin can't.
+    const draftId = b.replies()[0].reply_markup.inline_keyboard.flat().find((x: any) => x.text.startsWith("✅ Create")).callback_data.split(":")[1];
+    await b.tap(`create:${draftId}`, MEMBER);
+    expect(b.sent.filter((s) => s.method === "answerCallbackQuery").at(-1)!.payload.text).toMatch(/Only the admin/);
+    await b.tap(`create:${draftId}`);
+    expect((await getDraft(draftId))!.admin_id).toBe(ADMIN.id);
+    expect(b.replies().find((r) => r.chat_id === ADMIN.id)).toBeTruthy();
+  });
+
+  it("asks for contenders by reply and feeds the admin's names straight into the split, with a Rephrase button", async () => {
+    const b = makeBot([7]);
+    await b.msg("/new who wins BBNaija?");
+    const ask = b.replies()[0];
+    expect(ask.text).toMatch(/Reply to this message with their names/);
+    expect(ask.reply_markup.force_reply).toBe(true);
+    const askId = b.sent.filter((s) => s.method === "sendMessage").length + 100; // fake API numbers messages from 101
+    await b.msg("Kellyrae, Wanni", MEMBER, GROUP, askId); // not the admin: ignored
+    expect(b.replies()).toHaveLength(1);
+    await b.msg("Kellyrae, Wanni or Dede", ADMIN, GROUP, askId);
+    const pick = b.replies().at(-1);
+    expect(pick.text).toContain("Will Dede win BBNaija?");
+    const labels = pick.reply_markup.inline_keyboard.flat().map((x: any) => x.text);
+    expect(labels).toEqual(["➕ Kellyrae", "➕ Wanni", "➕ Dede", "✍️ Rephrase as one YES/NO"]);
+    expect(pick.text).toContain("Will Kellyrae, Wanni or Dede win BBNaija?");
   });
 
   it("/new refuses personal bets politely, with a suggestion", async () => {
@@ -166,7 +227,7 @@ describe("practice markets in Telegram (test mode)", () => {
     const admin = Keypair.generate(), w = admin.publicKey.toBase58();
     await upsertGroup(GROUP.id, GROUP.title);
     const d = await saveDraft(GROUP.id, 7, draftMarket("Will Tinubu win the 2027 presidential election | 31 Mar 2027", { now: Math.floor(Date.now() / 1000) }));
-    const s = await startCreate(d.id, w);
+    const s = await startCreate(d.id, w, d.admin_id);
     return (await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, signText(admin, s.practiceMessage!))).marketId;
   }
   async function buy(id: string, kp: Keypair, side: "yes" | "no", amount: number) {
@@ -196,8 +257,17 @@ describe("practice markets in Telegram (test mode)", () => {
     await linkWallet(42, kp.publicKey.toBase58());
     await notifyTick(b.bot);
     const alerts = b.sent.filter((s) => s.method === "sendMessage" && s.payload.chat_id === GROUP.id).map((s) => s.payload.text as string).filter((t) => t.includes(" bought "));
-    expect(alerts).toHaveLength(2);
-    expect(alerts.join("\n")).toMatch(/Ada .* bought <b>YES<\/b> \$10\.00 on <b>.*Tinubu/);
+    // Batched: two buys in the same minute → one summary for the market.
+    expect(alerts).toHaveLength(0);
+    const sums = b.sent.filter((s) => s.method === "sendMessage" && s.payload.chat_id === GROUP.id).map((s) => s.payload.text as string).filter((t) => t.includes("new buys"));
+    expect(sums).toHaveLength(1);
+    expect(sums[0]).toMatch(/2 new buys<\/b> \(\$14\.00\) on <b>.*Tinubu/);
+    expect(sums[0]).toMatch(/Ada .*<b>YES<\/b> \$10\.00/);
+    alerts.push(sums[0]);
+    // Another buy within the minute waits (no second message yet).
+    await buy(id, Keypair.generate(), "no", 5);
+    await notifyTick(b.bot);
+    expect(b.sent.filter((s) => s.method === "sendMessage" && s.payload.chat_id === GROUP.id && /bought|new buys/.test(s.payload.text))).toHaveLength(1);
     expect(alerts.join("\n")).toMatch(/Pot now \$19\.00 · YES \d+% \/ NO \d+%/);
     expect(alerts.join("\n")).toContain("Practice market");
 

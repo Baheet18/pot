@@ -17,7 +17,7 @@ const H = 3600;
 export interface MultiOption { label: string; question: string }
 export type DraftResult =
   | { kind: "draft"; draft: MarketDraft }
-  | { kind: "clarify"; question: string }
+  | { kind: "clarify"; question: string; askNames?: { contest: string; verb: string; question: string } }
   /** Personal/private bets no public source can settle. */
   | { kind: "refuse"; message: string; suggestion: string }
   /** Multi-outcome question: Panta is YES/NO only, so offer one market per top option, or one rephrased question. */
@@ -54,6 +54,17 @@ export function multiOutcome(text: string): { contest: string; options: string[]
   const contest = head.slice(m[0].length).replace(/[?.!]+$/, "").trim();
   const options = tail.replace(/[?.!]+$/, "").split(/\s*(?:,|\bor\b|\band\b|\/|\bvs\.?\b)\s*/i).map((x) => x.trim()).filter((x) => x.length >= 2 && x.length <= 60);
   return { contest, options: [...new Set(options)].slice(0, MAX_OPTIONS), verb };
+}
+/** Rule-based one-question version of a named split, so "Rephrase" always has something: "Will A, B or C win X?". */
+export function ruleRephrase(names: string[], contest: string, verb: string): string | null {
+  const n = names.slice(0, MAX_OPTIONS);
+  if (n.length < 2) return null;
+  return `Will ${n.slice(0, -1).join(", ")} or ${n.at(-1)} ${verb} ${contest || "it"}?`.replace(/\s+/g, " ");
+}
+/** Names typed by an admin ("Kellyrae, Wanni or Dede", one per line, …). */
+export function parseNames(text: string): string[] {
+  return [...new Set(text.replace(/^\/\w+(@\w+)?\s*/, "").split(/\s*(?:,|;|\n|\bor\b|\band\b|&|\/|\bvs\.?\b)\s*/i)
+    .map((x) => x.replace(/^[-•*\d.)\s]+/, "").replace(/[?.!]+$/, "").trim()).filter((x) => x.length >= 2 && x.length <= 60))].slice(0, MAX_OPTIONS);
 }
 export function multiOptions(names: string[], contest: string, verb: string): MultiOption[] {
   const what = contest || "it";
@@ -355,8 +366,10 @@ export async function draftWithAI(input: string, opts: AiOptions & { previous?: 
   // Checks that work with or without the AI: private bets, and multi-outcome questions with named options.
   const multi = opts.previous ? null : multiOutcome(text);
   if (!opts.previous && isPersonalBet(text)) return { kind: "refuse", message: REFUSE_MESSAGE, suggestion: REFUSE_SUGGESTION };
-  if (multi && multi.options.length >= 2) return { kind: "multi", question: text, options: multiOptions(multi.options, multi.contest, multi.verb), rephrase: null };
-  const askNames: DraftResult | null = multi ? { kind: "clarify", question: `Panta markets are YES/NO only, so I'll make one market per contender. Who are the main ones? Send e.g. /new who ${multi.verb === "win" ? "wins" : `will ${multi.verb}`} ${multi.contest || "it"}: Name A, Name B or Name C` } : null;
+  if (multi && multi.options.length >= 2) return splitNamed(text, multi.options, multi.contest, multi.verb, { ...opts, now });
+  const askNames: DraftResult | null = multi ? { kind: "clarify", question: `Panta markets are YES/NO only, so I'll make one market per contender. Who are the main ones? Reply to this message with their names, e.g. Name A, Name B, Name C`, askNames: { contest: multi.contest, verb: multi.verb, question: text } } : null;
+  // Multi-outcome without names: ask the admin for them rather than let the AI guess contenders.
+  if (askNames) return askNames;
   const key = opts.key === undefined ? geminiKey() : opts.key;
   if (!key) {
     if (opts.previous) throw new Error("The AI drafter isn't set up, so use /edit <field> <value> instead.");
@@ -381,7 +394,9 @@ export async function draftWithAI(input: string, opts: AiOptions & { previous?: 
       }
       if (out.status === "multi" && !opts.previous) {
         const options = (out.options ?? []).filter((x) => x?.label && x?.question).slice(0, MAX_OPTIONS)
-          .map((x) => ({ label: String(x.label).slice(0, 40), question: String(x.question).replace(/\s+/g, " ").trim().slice(0, 300) }));
+          .map((x) => ({ label: String(x.label).slice(0, 40), question: String(x.question).replace(/\s+/g, " ").trim().slice(0, 300) }))
+          .filter((o) => text.toLowerCase().includes(o.label.toLowerCase())); // only names the admin actually typed
+        if (options.length < 2) return { kind: "clarify", question: "Panta markets are YES/NO only, so I'll make one market per contender. Who are the main ones? Reply to this message with their names, e.g. Name A, Name B, Name C", askNames: { contest: text.replace(/^(who|which)\s+(\w+\s+)?(will\s+)?(wins?|be|become)\s*/i, "").replace(/[?.!]+$/, "").trim(), verb: "win", question: text } };
         if (options.length >= 2) return { kind: "multi", question: text, options, rephrase: out.rephrase?.trim() ? out.rephrase.trim().slice(0, 300) : null };
         if (askNames) return askNames;
       }
@@ -472,3 +487,26 @@ function toUnixLoose(s: string): number | null {
 }
 
 export const describeTimes = (d: MarketDraft) => `buying closes ${fmtWat(d.startTime)}, ends ${fmtWat(d.endTime)}`;
+
+/**
+ * Split a multi-outcome question over names the ADMIN gave (never invented). The AI words each YES/NO question and the one-question
+ * rephrase; the rule-based split is the fallback, and it always offers a rule-based rephrase so the Rephrase button shows.
+ */
+export async function splitNamed(question: string, names: string[], contest: string, verb: string, opts: AiOptions = {}): Promise<DraftResult> {
+  const now = opts.now ?? Math.floor(Date.now() / 1000);
+  const rules = multiOptions(names, contest, verb);
+  const fallback: DraftResult = { kind: "multi", question, options: rules, rephrase: ruleRephrase(names, contest, verb) };
+  const key = opts.key === undefined ? geminiKey() : opts.key;
+  if (!key || rules.length < 2) return fallback;
+  try {
+    const contents = [{ role: "user", parts: [{ text: `Admin's idea: ${JSON.stringify(question)}\nThe admin named exactly these contenders: ${JSON.stringify(rules.map((o) => o.label))}.\nReturn status "multi": one option per named contender (same labels, no others, do not add or invent names), each a clear YES/NO question, plus "rephrase": one YES/NO question that captures the idea.` }] }];
+    const out = await callGemini(key, contents, now, opts, Date.now() + (opts.timeoutMs ?? 20_000));
+    const byLabel = new Map((out.options ?? []).filter((x) => x?.label && x?.question).map((x) => [String(x.label).trim().toLowerCase(), String(x.question).replace(/\s+/g, " ").trim().slice(0, 300)]));
+    const options = rules.map((o) => ({ label: o.label, question: byLabel.get(o.label.toLowerCase()) || o.question }));
+    const rephrase = out.rephrase?.trim() ? out.rephrase.trim().slice(0, 300) : fallback.rephrase;
+    return { kind: "multi", question, options, rephrase };
+  } catch (e) {
+    console.error("[pot] AI split fallback:", (e as Error).name === "AbortError" ? "timed out" : /HTTP (\d+)/.exec((e as Error).message)?.[0] ?? "error");
+    return fallback;
+  }
+}

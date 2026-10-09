@@ -101,8 +101,8 @@ export async function latestOpenDraft(chatId: number, adminId: number): Promise<
   return toDraft(await one<Record<string, unknown>>(
     `SELECT * FROM drafts WHERE chat_id=? AND admin_id=? AND mode=? AND status IN ('draft','building','confirmed') ORDER BY created_at DESC, id DESC LIMIT 1`, [chatId, adminId, MODE]));
 }
-const DRAFT_COLS = new Set(["status", "market_id", "creator_wallet", "create_signature", "message_id"]);
-export async function updateDraft(id: string, patch: Partial<{ status: string; market_id: string; creator_wallet: string; create_signature: string; message_id: number; draft: MarketDraft }>) {
+const DRAFT_COLS = new Set(["admin_id", "status", "market_id", "creator_wallet", "create_signature", "message_id"]);
+export async function updateDraft(id: string, patch: Partial<{ admin_id: number; status: string; market_id: string; creator_wallet: string; create_signature: string; message_id: number; draft: MarketDraft }>) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {
@@ -412,3 +412,14 @@ export async function saveCreate(c: { createId: string; draftId: string; wallet:
 export async function getCreate(createId: string): Promise<{ draft_id: string; wallet: string; fee_usdc: number } | null> {
   return (await one<{ draft_id: string; wallet: string; fee_usdc: number }>(`SELECT draft_id, wallet, fee_usdc FROM creates WHERE create_id=? AND mode=?`, [createId, MODE])) ?? null;
 }
+
+// ---------------------------------------------------------------- small keyed state (e.g. "reply with names" prompts)
+export async function kvPut(key: string, value: unknown) {
+  await run(`INSERT INTO kv (k, v, updated_at) VALUES (?,?,?) ON CONFLICT (k) DO UPDATE SET v=excluded.v, updated_at=excluded.updated_at`, [`${MODE}:${key}`, JSON.stringify(value), now()]);
+}
+export async function kvTake<T>(key: string, maxAgeSec = 86_400): Promise<T | null> {
+  const r = await one<{ v: string; updated_at: number }>(`SELECT v, updated_at FROM kv WHERE k=?`, [`${MODE}:${key}`]);
+  if (!r || now() - Number(r.updated_at) > maxAgeSec) return null;
+  try { return JSON.parse(r.v) as T; } catch { return null; }
+}
+export async function kvDelete(key: string) { await run(`DELETE FROM kv WHERE k=?`, [`${MODE}:${key}`]); }

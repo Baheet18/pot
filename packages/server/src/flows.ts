@@ -2,8 +2,8 @@ import { LIMITS, estimateBuyPayout, parseRef, pantaUserId, refGroup, toCreateQuo
 import { randomBytes } from "node:crypto";
 import { getMarketView } from "./views";
 import { getWalletTrades, invalidate, pantaPost, PantaError } from "./panta";
-import { compileTx, fundsProblem, readWalletFunds, isSandboxSignature, isSignature, isWallet, isMarketId, type PantaIx } from "./tx";
-import { createNameClaim, getCreate, getDraft, getOrder, saveCreate, saveOrder, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft, walletLinked } from "./store";
+import { assertTxAllowed, compileTx, fundsProblem, readWalletFunds, isSandboxSignature, isSignature, isWallet, isMarketId, type PantaIx } from "./tx";
+import { walletsFor, createNameClaim, getCreate, getDraft, getOrder, saveCreate, saveOrder, insertPracticeTrade, linkGroupMarket, recordBuy, updateDraft, walletLinked } from "./store";
 import { refIsTrusted } from "./tokens";
 import { DEFAULT_MARKET_IMAGE, SANDBOX } from "./settings";
 import { newPracticeMessage, verifyPractice } from "./practice";
@@ -139,11 +139,18 @@ export async function finishBuy(input: {
 }
 
 // ---------------------------------------------------------------- create market (admin signs + pays)
-export async function startCreate(draftId: string, wallet: string) {
+/**
+ * Only the drafting admin can start a creation: the create link's signed token names their Telegram id (`adminId`), and the link
+ * is sent to them by DM. Once a wallet has started, a different wallet is only accepted if the admin has linked it (/link).
+ */
+export async function startCreate(draftId: string, wallet: string, adminId: number | null | undefined) {
   const row = await getDraft(draftId);
   if (!row) throw new FlowError(404, "NO_DRAFT", "Draft not found");
+  if (!adminId || Number(row.admin_id) !== Number(adminId)) throw new FlowError(403, "NOT_DRAFT_ADMIN", "This create link belongs to another admin. Tap ✅ Create on your own draft.");
   if (row.status === "created") throw new FlowError(409, "ALREADY_CREATED", "This market was already created");
   if (!isWallet(wallet)) throw bad("BAD_WALLET", "Bad wallet");
+  if (row.creator_wallet && row.creator_wallet !== wallet && !(await walletsFor(Number(row.admin_id))).includes(wallet))
+    throw new FlowError(403, "WRONG_CREATOR_WALLET", "This creation was started with a different wallet. Use that wallet, or link this one with /link in a DM to the bot first.");
   const problems = validateDraft(row.draft);
   if (problems.length) throw bad("BAD_DRAFT", problems.join("; "));
   if (SANDBOX) {
@@ -163,6 +170,7 @@ export async function startCreate(draftId: string, wallet: string) {
   const funds = fundsProblem(await readWalletFunds(wallet), feeUsdc);
   if (funds) throw new FlowError(402, funds.code, funds.message);
   const b = await pantaPost<{ transaction: string; recentBlockhash: string; lastValidBlockHeight: number }>("/markets/create/build/", { createId: q.createId, wallet });
+  assertTxAllowed(b.transaction, wallet);
   await saveCreate({ createId: q.createId, draftId, wallet, feeUsdc });
   await updateDraft(draftId, { creator_wallet: wallet, status: "building" });
   return { createId: q.createId, expectedMarketId: q.expectedEventPda, feeUsdc, transaction: b.transaction, practiceMessage: null, lastValidBlockHeight: b.lastValidBlockHeight, sandbox: false };

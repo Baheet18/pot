@@ -6,7 +6,7 @@ import bs58 from "bs58";
 import { draftMarket, linkMessage } from "@pot/core";
 import {
   finishBuy, finishCreate, FlowError, globalLeaderboard, groupLeaderboard, recordBuy, resetDbForTests, saveDraft, sign, signRef,
-  startBuy, startCreate, verify, verifyAndLink, walletsFor, getDraft, groupMarkets, refIsTrusted, pantaPost, buildClaim,
+  startBuy, startCreate, linkWallet, verify, verifyAndLink, walletsFor, getDraft, groupMarkets, refIsTrusted, pantaPost, buildClaim,
   compileTx, verifyPractice, newPracticeMessage, finishBuyPractice, finishCreatePractice, confirmClaimPractice,
 } from "../src";
 import { parsePracticeMessage } from "@pot/core";
@@ -83,10 +83,20 @@ describe("buy flow (sandbox fixtures)", () => {
 });
 
 describe("create flow (test mode = practice market)", () => {
+  it("create link takeover: only the drafting admin (token-bound id) can start, and only with their first or a linked wallet", async () => {
+    const d = await saveDraft(-78, 9, draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm", { now: Math.floor(Date.now() / 1000) }));
+    const a = Keypair.generate().publicKey.toBase58(), thief = Keypair.generate().publicKey.toBase58(), linked = Keypair.generate().publicKey.toBase58();
+    await expect(startCreate(d.id, thief, 42)).rejects.toMatchObject({ code: "NOT_DRAFT_ADMIN", status: 403 });
+    await expect(startCreate(d.id, thief, undefined)).rejects.toMatchObject({ code: "NOT_DRAFT_ADMIN" });
+    await startCreate(d.id, a, 9);
+    await expect(startCreate(d.id, thief, 9)).rejects.toMatchObject({ code: "WRONG_CREATOR_WALLET" });
+    await linkWallet(9, linked);
+    expect((await startCreate(d.id, linked, 9)).createId).toMatch(/^cr_p_/);
+  });
   it("never calls Panta, then stores the draft as a practice market linked to the group", async () => {
     const kp = Keypair.generate(), w = kp.publicKey.toBase58();
     const d = await saveDraft(-77, 9, draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm", { now: Math.floor(Date.now() / 1000) }));
-    const s = await startCreate(d.id, w);
+    const s = await startCreate(d.id, w, d.admin_id);
     expect(s.createId).toMatch(/^cr_p_/);
     expect(s.transaction).toBe(""); // practice mode: no transaction for the wallet
     expect(parsePracticeMessage(s.practiceMessage!)).toMatchObject({ action: "create", wallet: w, ref: s.createId });
@@ -96,7 +106,7 @@ describe("create flow (test mode = practice market)", () => {
     expect(f.practice).toBe(true);
     expect((await getDraft(d.id))?.status).toBe("created");
     expect((await groupMarkets(-77))[0]).toMatchObject({ market_id: f.marketId, created_by_group: 1, creator_wallet: w });
-    await expect(startCreate(d.id, w)).rejects.toThrow(/already/);
+    await expect(startCreate(d.id, w, d.admin_id)).rejects.toThrow(/already/);
   });
 });
 
@@ -144,7 +154,7 @@ describe("practice mode (no transactions, ever)", () => {
   it("finishCreatePractice registers only for the wallet that started it", async () => {
     const kp = Keypair.generate(), w = kp.publicKey.toBase58();
     const d = await saveDraft(-78, 9, draftMarket("Will Arsenal beat Chelsea | tomorrow 4pm", { now: Math.floor(Date.now() / 1000) }));
-    const s = await startCreate(d.id, w);
+    const s = await startCreate(d.id, w, d.admin_id);
     const sig = signText(kp, s.practiceMessage!);
     await expect(finishCreatePractice(d.id, s.createId, W, s.practiceMessage!, sig)).rejects.toThrow(/same wallet/);
     const f = await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, sig);

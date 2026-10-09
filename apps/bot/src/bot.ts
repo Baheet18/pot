@@ -4,7 +4,7 @@ import { esc, findDeadline, fmtWat, formatReceiptHtml, receiptDue, renderCard, v
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
-  walletsFor, consumeNameClaim, receiptFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
+  walletsFor, claimSlot, type BuyRow, kvPut, kvTake, kvDelete, parseNames, splitNamed, consumeNameClaim, receiptFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
 /**
@@ -39,8 +39,15 @@ function isGroup(ctx: Context) {
   return ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
 }
 
+/** Telegram's stand-in sender for admins posting with "Remain anonymous" on. */
+export const ANON_ADMIN_ID = 1087968824;
+/** A post made as the group itself (anonymous admin via GroupAnonymousBot, sender_chat = this group) can only come from an admin. */
+export function isAnonymousAdmin(ctx: Context): boolean {
+  return isGroup(ctx) && !!ctx.chat && ctx.msg?.sender_chat?.id === ctx.chat.id;
+}
 async function isAdmin(ctx: Context): Promise<boolean> {
   if (!isGroup(ctx)) return true; // DMs: the user is their own admin (handy for testing)
+  if (isAnonymousAdmin(ctx)) return true;
   if (!ctx.from) return false;
   try {
     const m = await ctx.getChatMember(ctx.from.id);
@@ -115,8 +122,33 @@ const draftKeyboard = (id: string, d: MarketDraft, problems: string[]) => {
 
 export type Drafter = (text: string, extra?: { previous?: MarketDraft; instruction?: string }) => Promise<DraftResult>;
 
-export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafter?: Drafter } = {}) {
+const displayName = (u: { username?: string; first_name: string; last_name?: string }) => (u.username ? `@${u.username}` : [u.first_name, u.last_name].filter(Boolean).join(" "));
+/** DMs the drafting admin their private sign & pay link (token bound to draft + admin). False if Telegram won't let the bot DM them yet. */
+export async function dmCreateLink(api: Bot["api"], adminId: number, draftId: string, fee: number): Promise<boolean> {
+  const t = sign({ d: draftId, u: adminId }, 2 * 3600);
+  const url = `${WEB_URL}/create/${draftId}?t=${t}`;
+  const text = `💳 <b>Sign & pay to create</b>\nThis link is just for you; don't share it. Open it in Phantom, check the details, then sign. The fee is $${fee} USDC and you become the creator (royalty goes to your wallet).${SANDBOX ? "\n🧪 Practice mode: you sign a free message, nothing is charged." : ""}`;
+  try {
+    if (isPublicHttps()) await api.sendMessage(adminId, text, { parse_mode: "HTML", reply_markup: new InlineKeyboard().url("✍️ Sign & pay", url) });
+    else await api.sendMessage(adminId, `${text}\n\n${esc(url)}`, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+    return true;
+  } catch (e) {
+    if (/403|blocked|initiate|chat not found|Forbidden/i.test(String((e as Error).message))) return false;
+    throw e;
+  }
+}
+
+/** The drafting admin, or (for drafts started by an anonymous admin) any real admin of the group. */
+async function ownsOrAdmin(ctx: Context, ownerId: number): Promise<boolean> {
+  if (!ctx.from) return false;
+  if (Number(ownerId) === ctx.from.id) return true;
+  return Number(ownerId) === ANON_ADMIN_ID && ctx.from.id !== ANON_ADMIN_ID && (await isAdmin(ctx));
+}
+
+export type Splitter = (question: string, names: string[], contest: string, verb: string) => Promise<DraftResult>;
+export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafter?: Drafter; splitter?: Splitter } = {}) {
   const drafter: Drafter = opts.drafter ?? ((text, extra) => draftWithAI(text, extra));
+  const splitter: Splitter = opts.splitter ?? ((q, n, c, v) => splitNamed(q, n, c, v));
   const bot = new Bot(token, opts.botInfo ? { botInfo: opts.botInfo } : undefined);
   const botUser = () => bot.botInfo?.username ?? "pantapotbot";
 
@@ -163,6 +195,13 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       if (c.marketId) await rerenderReceipts(ctx.api, c.marketId).catch(() => undefined);
       return ctx.reply(`✅ Done. Your buy now shows as <b>${esc(name)}</b> in group alerts and receipts, and wallet ${shortW(c.wallet)} is linked, so /mine shows your positions.`, { parse_mode: "HTML" });
     }
+    if (payload?.startsWith("c_d_") && ctx.from && !isGroup(ctx)) {
+      const row = await getDraft(payload.slice(2));
+      if (!row || Number(row.admin_id) !== ctx.from.id) return ctx.reply("That create link isn't yours. Only the admin who tapped ✅ Create can pay for it.");
+      if (row.status === "created") return ctx.reply("That market was already created.");
+      await dmCreateLink(ctx.api, ctx.from.id, row.id, row.draft.creationFeeUsdc);
+      return;
+    }
     if (payload?.startsWith("m_") && isMarketId(payload.slice(2))) return sendCard(ctx, payload.slice(2), memberRef(ctx));
     await ctx.reply(help + SANDBOX_NOTE, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
   });
@@ -185,6 +224,12 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
   /** Reply to a drafter result: a draft preview, a clarifying question, a polite refusal, or YES/NO options to pick. */
   async function showResult(ctx: Context, r: DraftResult) {
     if (!ctx.chat || !ctx.from) return;
+    if (r.kind === "clarify" && r.askNames) {
+      // Contenders by reply: the admin's names go straight into the split (nothing invented).
+      const m = await ctx.reply(`🤔 ${esc(r.question)}`, { parse_mode: "HTML", reply_markup: { force_reply: true, selective: true, input_field_placeholder: "Name A, Name B, Name C" } });
+      await kvPut(`names:${ctx.chat.id}:${m.message_id}`, { admin: ctx.from.id, ...r.askNames });
+      return;
+    }
     if (r.kind === "clarify") return ctx.reply(`🤔 ${r.question}\n\nSend /new again with a bit more detail.`);
     if (r.kind === "refuse") return ctx.reply(`${r.message}\n\n💡 ${r.suggestion}`);
     if (r.kind === "multi") {
@@ -202,7 +247,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
   bot.callbackQuery(/^opt:(c_[\w-]+):(\d+|r)$/, async (ctx) => {
     const c = await getChoice(ctx.match[1]);
     if (!c) return ctx.answerCallbackQuery({ text: "That list expired. Send /new again." });
-    if (c.admin_id !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Only the admin who asked can pick." });
+    if (!(await ownsOrAdmin(ctx, c.admin_id))) return ctx.answerCallbackQuery({ text: "Only the admin who asked can pick." });
     const pick = ctx.match[2];
     const opt = pick === "r" ? (c.rephrase ? { label: "Rephrased", question: c.rephrase } : null) : c.options[Number(pick)];
     if (!opt) return ctx.answerCallbackQuery({ text: "Option not found." });
@@ -241,7 +286,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     const replyTo = ctx.message?.reply_to_message?.message_id;
     const row = replyTo ? await draftByMessage(ctx.chat.id, replyTo) : await latestOpenDraft(ctx.chat.id, ctx.from.id);
     if (!row) return null;
-    if (Number(row.admin_id) !== ctx.from.id) { await ctx.reply("Only the admin who drafted this can change it."); return "denied" as const; }
+    if (!(await ownsOrAdmin(ctx, row.admin_id)) && !(Number(row.admin_id) === ANON_ADMIN_ID && isAnonymousAdmin(ctx))) { await ctx.reply("Only the admin who drafted this can change it."); return "denied" as const; }
     if (row.status === "created" || row.status === "cancelled") { await ctx.reply(`That draft was already ${row.status}. Start a new one with /new.`); return "denied" as const; }
     return row;
   }
@@ -267,7 +312,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
 
   bot.callbackQuery(/^cancel:(d_[\w-]+)$/, async (ctx) => {
     const row = await getDraft(ctx.match[1]);
-    if (!row || row.admin_id !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Only the admin who drafted this can cancel it." });
+    if (!row || !(await ownsOrAdmin(ctx, row.admin_id))) return ctx.answerCallbackQuery({ text: "Only the admin who drafted this can cancel it." });
     if (row.status !== "created") await updateDraft(row.id, { status: "cancelled" });
     await ctx.answerCallbackQuery({ text: "Draft cancelled" });
     await ctx.editMessageText("❌ Draft cancelled.");
@@ -276,15 +321,21 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
   bot.callbackQuery(/^create:(d_[\w-]+)$/, async (ctx) => {
     const row = await getDraft(ctx.match[1]);
     if (!row) return ctx.answerCallbackQuery({ text: "Draft not found." });
-    if (row.admin_id !== ctx.from.id) return ctx.answerCallbackQuery({ text: "Only the admin who drafted this can create it." });
+    if (!(await ownsOrAdmin(ctx, row.admin_id))) return ctx.answerCallbackQuery({ text: "Only the admin who drafted this can create it." });
+    if (ctx.from.id === ANON_ADMIN_ID) return ctx.answerCallbackQuery({ text: "Turn off 'Remain anonymous' to pay: I need to DM you the sign & pay link.", show_alert: true });
     if (row.status === "created") return ctx.answerCallbackQuery({ text: "Already created." });
+    // A draft started anonymously becomes this admin's: the pay link and the creator role are bound to them.
+    if (Number(row.admin_id) !== ctx.from.id) await updateDraft(row.id, { admin_id: ctx.from.id });
     await updateDraft(row.id, { status: "confirmed" });
-    const t = sign({ d: row.id, u: ctx.from.id }, 2 * 3600);
-    const url = `${WEB_URL}/create/${row.id}?t=${t}`;
-    await ctx.answerCallbackQuery({ text: "Open the link to sign and pay." });
-    const text = `💳 <b>Sign & pay to create</b>\nOpen this in Phantom, check the details, then sign. The fee is $${row.draft.creationFeeUsdc} USDC and you become the creator (royalty goes to your wallet).${SANDBOX ? "\n🧪 Sandbox: no real payment, you can simulate." : ""}`;
-    if (isPublicHttps()) await ctx.reply(text, { parse_mode: "HTML", reply_markup: new InlineKeyboard().url("✍️ Sign & pay", url) });
-    else await ctx.reply(`${text}\n\n${esc(url)}`, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+    if (await dmCreateLink(ctx.api, ctx.from.id, row.id, row.draft.creationFeeUsdc)) {
+      await ctx.answerCallbackQuery({ text: "I've sent you the sign & pay link in a private message." });
+      if (isGroup(ctx)) await ctx.reply(`💳 ${esc(displayName(ctx.from))}, I've sent you the sign & pay link in a private message. Only you can use it.`, { parse_mode: "HTML" });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Start a chat with me first, then I'll send the link.", show_alert: true });
+    const start = `https://t.me/${ctx.me.username}?start=c_${row.id}`;
+    await ctx.reply(`💳 ${esc(displayName(ctx.from))}, I can't message you yet. Open ${esc(start)} and tap <b>Start</b>; I'll send your private sign & pay link there.`,
+      { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: new InlineKeyboard().url("Start a chat with Pot", start) });
   });
 
   async function sendCard(ctx: Context, marketId: string, ref: Ref) {
@@ -476,6 +527,15 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
   bot.on("message:text", async (ctx, next) => {
     const reply = ctx.message.reply_to_message;
     if (!reply || reply.from?.id !== ctx.me.id || ctx.message.text.startsWith("/")) return next();
+    const ask = await kvTake<{ admin: number; contest: string; verb: string; question: string }>(`names:${ctx.chat.id}:${reply.message_id}`);
+    if (ask) {
+      if (!(await ownsOrAdmin(ctx, ask.admin)) && !(ask.admin === ANON_ADMIN_ID && isAnonymousAdmin(ctx))) return;
+      const names = parseNames(ctx.message.text);
+      if (names.length < 2) return void (await ctx.reply("Send at least two names, separated by commas (e.g. Kellyrae, Wanni, Dede)."));
+      await kvDelete(`names:${ctx.chat.id}:${reply.message_id}`);
+      await ctx.replyWithChatAction("typing").catch(() => undefined);
+      return void (await showResult(ctx, await splitter(ask.question, names, ask.contest, ask.verb)));
+    }
     const found = await draftByMessage(ctx.chat.id, reply.message_id);
     if (!found) return next();
     const row = await editableDraft(ctx);
@@ -500,21 +560,48 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
 }
 
 /** Posts new buys and phase changes into groups. Runs on an interval in main.ts. */
+/** At most one buy alert per market per group per this many seconds; buys in between are summed into one message. */
+export const ALERT_EVERY_SEC = 60;
+
 export async function notifyTick(bot: Bot) {
+  const groups = new Map<string, BuyRow[]>();
   for (const b of await unnotifiedBuys()) {
-    if (!(await claimNotify(b.signature))) continue; // another instance already took it
+    const k = `${b.chat_id}:${b.market_id}`;
+    groups.set(k, [...(groups.get(k) ?? []), b]);
+  }
+  for (const [k, pending] of groups) {
+    if (!(await claimSlot(`alert:${k}`, ALERT_EVERY_SEC))) continue; // sent one <1 min ago: these wait and get summed next time
+    const buys: BuyRow[] = [];
+    for (const b of pending) if (await claimNotify(b.signature)) buys.push(b); // another instance may have taken some
+    if (!buys.length) continue;
+    const first = buys[0];
     try {
-      const v = await getMarketView(b.market_id).catch(() => null);
-      const title = v ? v.market.title : b.market_id.slice(0, 8) + "…";
-      const owner = await walletOwnerName(b.wallet).catch(() => null);
-      const buyer = owner ? `${esc(owner)} (${shortW(b.wallet)})` : shortW(b.wallet);
-      const who = b.sharer_tg_id ? ` via ${esc(await memberName(b.sharer_tg_id) ?? "a member")}'s link` : "";
-      const fresh = b.new_to_panta ? "\n🎉 First ever Panta trade for this wallet" : b.new_to_pot ? "\n👋 First Pot buy for this wallet" : "";
+      const v = await getMarketView(first.market_id).catch(() => null);
+      const title = v ? v.market.title : first.market_id.slice(0, 8) + "…";
+      const line = async (b: BuyRow) => {
+        const owner = await walletOwnerName(b.wallet).catch(() => null);
+        const buyer = owner ? `${esc(owner)} (${shortW(b.wallet)})` : shortW(b.wallet);
+        const who = b.sharer_tg_id ? ` via ${esc(await memberName(b.sharer_tg_id) ?? "a member")}'s link` : "";
+        const fresh = b.new_to_panta ? " 🎉 first ever Panta trade" : b.new_to_pot ? " 👋 first Pot buy" : "";
+        return { buyer, who, fresh };
+      };
       const yes = v?.stats.yesSplit;
       const state = v ? `\nPot now ${usd(v.market.totalVolumeUsdc || v.market.volumeUsdc)}${yes != null ? ` · YES ${Math.round(yes * 100)}% / NO ${100 - Math.round(yes * 100)}%` : ""}` : "";
       const tag = v?.practice ? "\n🧪 <i>Practice market: no real money</i>" : SANDBOX ? " 🧪" : "";
-      const kb = v?.buyable ? new InlineKeyboard().url("Buy too", marketUrl(b.market_id, { kind: "group", chatId: Number(b.chat_id) })) : undefined;
-      await bot.api.sendMessage(b.chat_id!, `${b.side === "yes" ? "🟩" : "🟥"} ${buyer} bought <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)} on <b>${esc(title)}</b>${who}${state}${fresh}${tag}`, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+      const kb = v?.buyable ? new InlineKeyboard().url("Buy too", marketUrl(first.market_id, { kind: "group", chatId: Number(first.chat_id) })) : undefined;
+      let text: string;
+      if (buys.length === 1) {
+        const l = await line(first);
+        const fresh = first.new_to_panta ? "\n🎉 First ever Panta trade for this wallet" : first.new_to_pot ? "\n👋 First Pot buy for this wallet" : "";
+        text = `${first.side === "yes" ? "🟩" : "🟥"} ${l.buyer} bought <b>${first.side.toUpperCase()}</b> ${usd(first.amount_usdc)} on <b>${esc(title)}</b>${l.who}${state}${fresh}${tag}`;
+      } else {
+        const total = buys.reduce((t, b) => t + Number(b.amount_usdc), 0);
+        const shown = buys.slice(0, 8);
+        const lines = await Promise.all(shown.map(async (b) => { const l = await line(b); return `${b.side === "yes" ? "🟩" : "🟥"} ${l.buyer} <b>${b.side.toUpperCase()}</b> ${usd(b.amount_usdc)}${l.who}${l.fresh}`; }));
+        const more = buys.length > shown.length ? `\n…and ${buys.length - shown.length} more` : "";
+        text = `🔔 <b>${buys.length} new buys</b> (${usd(total)}) on <b>${esc(title)}</b>\n${lines.join("\n")}${more}${state}${tag}`;
+      }
+      await bot.api.sendMessage(first.chat_id!, text, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
     } catch (e) {
       console.error("[bot] notify failed:", safeErr(e));
     }

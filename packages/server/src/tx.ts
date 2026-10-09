@@ -12,6 +12,34 @@ export function toIx(i: PantaIx): TransactionInstruction {
   });
 }
 
+/** Panta's on-chain program (the `programId` on every live market, seen 9 Oct 2026). Override with POT_PANTA_PROGRAM_IDS (comma-separated). */
+export const PANTA_PROGRAM_ID = "6gM5afTQBq5VZCfgpGqcsqzfWd5maLSCKWtGjbEobZMp";
+/** The only programs a transaction Pot hands to a wallet may call. */
+export const ALLOWED_PROGRAMS: ReadonlySet<string> = new Set([
+  ...(process.env.POT_PANTA_PROGRAM_IDS ? process.env.POT_PANTA_PROGRAM_IDS.split(",").map((x) => x.trim()).filter(Boolean) : [PANTA_PROGRAM_ID]),
+  "11111111111111111111111111111111", // System
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // SPL Token
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", // Associated Token Account
+  "ComputeBudget111111111111111111111111111111", // Compute Budget
+]);
+export function assertAllowedPrograms(ixs: PantaIx[]) {
+  for (const i of ixs) {
+    if (!ALLOWED_PROGRAMS.has(i.programId)) throw new Error(`Refusing to build a transaction that calls an unexpected program (${i.programId.slice(0, 8)}…). Nothing was signed.`);
+  }
+}
+
+/** Same check for a transaction Panta built itself (market creation): programs allowed, and the user's wallet pays the fee. */
+export function assertTxAllowed(txBase64: string, payer: string) {
+  const tx = VersionedTransaction.deserialize(Buffer.from(txBase64, "base64"));
+  const keys = tx.message.staticAccountKeys; // invoked programs are always static keys (never in lookup tables)
+  if (!keys[0]?.equals(new PublicKey(payer))) throw new Error("Refusing a transaction whose fee payer isn't your wallet. Nothing was signed.");
+  for (const ci of tx.message.compiledInstructions) {
+    const pid = keys[ci.programIdIndex]?.toBase58() ?? "?";
+    if (!ALLOWED_PROGRAMS.has(pid)) throw new Error(`Refusing to pass on a transaction that calls an unexpected program (${pid.slice(0, 8)}…). Nothing was signed.`);
+  }
+}
+
 let conn: Connection | null = null;
 export const connection = () => (conn ??= new Connection(RPC_URL, "confirmed"));
 
@@ -22,6 +50,7 @@ export const connection = () => (conn ??= new Connection(RPC_URL, "confirmed"));
 export async function compileTx(opts: { payer: string; instructions: PantaIx[]; recentBlockhash: string; memo?: string }): Promise<{ tx: string; blockhash: string; sandboxMemo: boolean }> {
   // Practice mode never builds transactions for a wallet (see practice.ts). Hard stop, not a convention.
   if (SANDBOX) throw new Error("No transactions are built in practice (test) mode.");
+  assertAllowedPrograms(opts.instructions);
   const payer = new PublicKey(opts.payer);
   const ixs = opts.instructions.map(toIx);
   const blockhash = opts.recentBlockhash;

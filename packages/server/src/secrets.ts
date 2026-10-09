@@ -33,8 +33,7 @@ function readSecret(file: string, validate: (s: string) => boolean, label: strin
     }
     throw new Error(`${label} not configured (file ${file} or env ${envName ?? "-"}).`);
   }
-  const mode = statSync(/*turbopackIgnore: true*/ file).mode & 0o777;
-  if (mode & 0o077) throw new Error(`${label} file ${file} must be chmod 600.`);
+  checkPermissions(file, label);
   const v = readFileSync(/*turbopackIgnore: true*/ file, "utf8").trim();
   if (!validate(v)) throw new Error(`${label} file ${file} does not look valid.`);
   memo.set(file, v);
@@ -86,4 +85,15 @@ export function geminiKey(): string | null {
   } catch {
     return null;
   }
+}
+
+/** POSIX: a secret file readable by group/others is refused. Windows has no POSIX modes (stat reports 0o666), so just warn once. */
+let warnedWin = false;
+export function checkPermissions(file: string, label: string, platform: string = process.platform) {
+  if (platform === "win32") {
+    if (!warnedWin) { warnedWin = true; console.warn(`[pot] Windows: can't check that ${label} file is private (chmod 600); keep it in your user profile.`); }
+    return;
+  }
+  const mode = statSync(/*turbopackIgnore: true*/ file).mode & 0o777;
+  if (mode & 0o077) throw new Error(`${label} file ${file} must be chmod 600.`);
 }

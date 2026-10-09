@@ -16,6 +16,6 @@
     "@types/better-sqlite3": "^7.6.12"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^11.7.0"
+    "better-sqlite3": "~12.9.0"
   }
 }

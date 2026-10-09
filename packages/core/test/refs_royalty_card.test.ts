@@ -32,6 +32,13 @@ describe("royalty", () => {
     expect(royaltyBpsForTilt(0.94)).toBe(500);
     expect(royaltyBpsForTilt(0.97)).toBe(0);
   });
+  it("matches Panta's published bands at every boundary (50–89 → 20%, 90–92 → 10%, 93–95 → 5%, 96+ → 0%)", () => {
+    const at = (pct: number) => royaltyBpsForTilt(pct / 100);
+    expect([50, 89, 89.9, 90, 92, 92.9, 93, 95, 95.9, 96, 100].map(at)).toEqual([2000, 2000, 2000, 1000, 1000, 1000, 500, 500, 500, 0, 0]);
+    expect(royaltyBpsForTilt(9 / 10)).toBe(1000);   // 9 of 10 traders: exactly 90%
+    expect(royaltyBpsForTilt(95 / 100)).toBe(500);  // Panta's worked 95/5 example: 5%
+    expect(royaltyBpsForTilt(24 / 25)).toBe(0);     // 96%
+  });
 });
 
 // Sandbox fixture as returned by Panta for pk_test keys (ISO times, no onChain block).

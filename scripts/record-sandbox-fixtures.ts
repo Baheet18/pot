@@ -24,7 +24,7 @@ await s.getPositions(W).catch(() => null);
 const b = await s.startBuy({ marketId: M, side: "yes", amountUsdc: 5, wallet: W });
 await s.finishBuy({ orderId: b.orderId, quoteId: b.quoteId, signature: "sandbox_recording1", wallet: W, marketId: M, side: "yes", amountUsdc: 5, channel: "web" });
 const d = s.saveDraft(-1, 1, core.draftMarket("Will Arsenal beat Chelsea on Sunday 4pm?"));
-const c = await s.startCreate(d.id, W);
+const c = await s.startCreate(d.id, W, d.admin_id);
 await s.finishCreate(d.id, c.createId, "sandbox_recording2");
 await s.buildClaim("win", W, M); await s.buildClaim("creator", W, M);
 const json = JSON.stringify(rec, null, 1);

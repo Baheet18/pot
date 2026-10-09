@@ -33,7 +33,7 @@ async function createPractice() {
   const admin = Keypair.generate();
   await upsertGroup(CHAT, "Naija Politics Chat");
   const d = await saveDraft(CHAT, 9, tinubuDraft());
-  const s = await startCreate(d.id, admin.publicKey.toBase58());
+  const s = await startCreate(d.id, admin.publicKey.toBase58(), d.admin_id);
   const f = await finishCreatePractice(d.id, s.createId, admin.publicKey.toBase58(), s.practiceMessage!, signText(admin, s.practiceMessage!));
   return f.marketId;
 }

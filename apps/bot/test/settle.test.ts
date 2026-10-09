@@ -44,7 +44,7 @@ async function practiceMarket(chat = GROUP) {
   const admin = Keypair.generate(), w = admin.publicKey.toBase58();
   await upsertGroup(chat.id, chat.title);
   const d = await saveDraft(chat.id, 7, draftMarket("Will Super Eagles beat Ghana in 2 days 8pm?", { now: Math.floor(Date.now() / 1000) }));
-  const s = await startCreate(d.id, w);
+  const s = await startCreate(d.id, w, d.admin_id);
   return (await finishCreatePractice(d.id, s.createId, w, s.practiceMessage!, signText(admin, s.practiceMessage!))).marketId;
 }
 async function buy(id: string, kp: Keypair, side: "yes" | "no", amount: number, chatId = GROUP.id) {

@@ -1,7 +1,7 @@
 import "./env";
 import { beforeEach, describe, expect, it } from "vitest";
 import { draftMarket, validateDraft } from "@pot/core";
-import { _resetGeminiCooldown, applyEdit, draftWithAI, isPersonalBet, multiOutcome, toMarketDraft } from "../src";
+import { _resetGeminiCooldown, applyEdit, draftWithAI, isPersonalBet, multiOutcome, parseNames, toMarketDraft } from "../src";
 
 beforeEach(() => _resetGeminiCooldown());
 const NOW = Math.floor(Date.parse("2026-10-04T15:32:00+01:00") / 1000);
@@ -93,26 +93,43 @@ describe("drafting fix (b): personal bets are politely refused", () => {
 });
 
 describe("drafting fix (c): multi-outcome questions", () => {
-  it("named options become YES/NO questions without calling the AI", async () => {
-    const g = mockGemini(MATCH);
+  it("named options go to the AI for wording + a rephrase, keeping exactly the admin's names", async () => {
+    const g = mockGemini({ status: "multi", options: [
+      { label: "Arsenal", question: "Will Arsenal win the 2026–27 Premier League?" }, { label: "Chelsea", question: "Will Chelsea win?" },
+      { label: "Liverpool", question: "Will Liverpool win the 2026–27 Premier League?" }], rephrase: "Will Arsenal, Man City or Liverpool win the 2026–27 Premier League?" });
     const r = await draftWithAI("/new which club will win the Premier League: Arsenal, Man City or Liverpool?", { now: NOW, key: KEY, fetchImpl: g.fetchImpl });
-    expect(g.calls).toHaveLength(0);
-    expect(r).toEqual({ kind: "multi", question: "which club will win the Premier League: Arsenal, Man City or Liverpool?", rephrase: null, options: [
-      { label: "Arsenal", question: "Will Arsenal win the Premier League?" },
-      { label: "Man City", question: "Will Man City win the Premier League?" },
-      { label: "Liverpool", question: "Will Liverpool win the Premier League?" },
+    expect(g.calls).toHaveLength(1);
+    expect(JSON.stringify(g.calls[0])).toContain("Man City");
+    expect(r).toEqual({ kind: "multi", question: "which club will win the Premier League: Arsenal, Man City or Liverpool?", rephrase: "Will Arsenal, Man City or Liverpool win the 2026–27 Premier League?", options: [
+      { label: "Arsenal", question: "Will Arsenal win the 2026–27 Premier League?" },
+      { label: "Man City", question: "Will Man City win the Premier League?" }, // AI skipped it: rule wording; AI's invented Chelsea dropped
+      { label: "Liverpool", question: "Will Liverpool win the 2026–27 Premier League?" },
     ] });
   });
-  it("the AI names the top contenders and a one-question rephrase", async () => {
-    const g = mockGemini({ status: "multi", options: [{ label: "Kellyrae", question: "Will Kellyrae win BBNaija Season 10?" }, { label: "Wanni", question: "Will Wanni win BBNaija Season 10?" }], rephrase: "Will a female housemate win BBNaija Season 10?" });
-    const r = await draftWithAI("/new who wins BBNaija?", { now: NOW, key: KEY, fetchImpl: g.fetchImpl });
-    expect(r.kind).toBe("multi");
-    if (r.kind === "multi") { expect(r.options.map((o) => o.label)).toEqual(["Kellyrae", "Wanni"]); expect(r.rephrase).toMatch(/female housemate/); }
+  it("without the AI (or if it fails) the rule-based split still offers a rephrase, so the button shows", async () => {
+    const r = await draftWithAI("/new which club will win the Premier League: Arsenal, Man City or Liverpool?", { now: NOW, key: null });
+    expect(r).toMatchObject({ kind: "multi", rephrase: "Will Arsenal, Man City or Liverpool win the Premier League?" });
+    const g = mockGemini(500 as any);
+    const r2 = await draftWithAI("/new which club will win the Premier League: Arsenal, Man City or Liverpool?", { now: NOW, key: KEY, fetchImpl: g.fetchImpl });
+    expect(r2).toMatchObject({ kind: "multi", rephrase: "Will Arsenal, Man City or Liverpool win the Premier League?" });
   });
-  it("without the AI, it asks for the contenders instead of guessing", async () => {
-    const r = await draftWithAI("/new who will win the 2027 election?", { now: NOW, key: null });
-    expect(r.kind).toBe("clarify");
-    if (r.kind === "clarify") expect(r.question).toMatch(/YES\/NO only.*Name A, Name B or Name C/s);
+  it("without names it asks the admin (by reply) and never lets the AI invent contenders", async () => {
+    const g = mockGemini({ status: "multi", options: [{ label: "Kellyrae", question: "Will Kellyrae win BBNaija Season 10?" }, { label: "Wanni", question: "Will Wanni win BBNaija Season 10?" }] });
+    const r = await draftWithAI("/new who wins BBNaija?", { now: NOW, key: KEY, fetchImpl: g.fetchImpl });
+    expect(g.calls).toHaveLength(0);
+    expect(r).toMatchObject({ kind: "clarify", askNames: { contest: "BBNaija", verb: "win" } });
+    if (r.kind === "clarify") expect(r.question).toMatch(/YES\/NO only.*Reply to this message with their names/s);
+    const r2 = await draftWithAI("/new who will win the 2027 election?", { now: NOW, key: null });
+    expect(r2.kind).toBe("clarify");
+  });
+  it("an AI 'multi' answer with names the admin never typed becomes a names question", async () => {
+    const g = mockGemini({ status: "multi", options: [{ label: "Tinubu", question: "Will Tinubu win?" }, { label: "Obi", question: "Will Obi win?" }] });
+    const r = await draftWithAI("/new Nigeria 2027 presidential race", { now: NOW, key: KEY, fetchImpl: g.fetchImpl });
+    expect(r).toMatchObject({ kind: "clarify" });
+  });
+  it("parses typed names", () => {
+    expect(parseNames("Kellyrae, Wanni or Dede")).toEqual(["Kellyrae", "Wanni", "Dede"]);
+    expect(parseNames("1. Kellyrae\n2. Wanni\n- Dede & Shaun")).toEqual(["Kellyrae", "Wanni", "Dede", "Shaun"]);
   });
   it("detects common shapes", () => {
     expect(multiOutcome("who wins BBNaija?")?.contest).toBe("BBNaija");
