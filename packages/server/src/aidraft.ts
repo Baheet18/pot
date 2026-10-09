@@ -1,5 +1,6 @@
 import { draftMarket, findDeadline, fmtWat, LIMITS, PANTA_CATEGORIES, validateDraft, type MarketDraft, type PantaCategory } from "@pot/core";
 import { geminiKey } from "./secrets";
+import { lookupFixtures, watDay, type Fixture, type FixtureMatch } from "./fixtures";
 
 /**
  * AI market drafter (Gemini, structured JSON). The model writes the market; this file checks every field
@@ -336,9 +337,9 @@ async function callModel(model: string, key: string, contents: unknown[], now: n
   }
 }
 
-const userTurn = (text: string, when?: string) => ({
+const userTurn = (text: string, when?: string, fixtureNote?: string) => ({
   role: "user",
-  parts: [{ text: `Admin's idea: ${JSON.stringify(text)}${when ? `\nAdmin's timing note: ${JSON.stringify(when)}` : ""}\nDraft the market as JSON.` }],
+  parts: [{ text: `Admin's idea: ${JSON.stringify(text)}${when ? `\nAdmin's timing note: ${JSON.stringify(when)}` : ""}${fixtureNote ? `\n${fixtureNote}` : ""}\nDraft the market as JSON.` }],
 });
 
 /** Rule-based fallback, clearly labelled. */
@@ -357,7 +358,42 @@ function rulesDraft(text: string, now: number, why: string): DraftResult {
  * Draft a market from a /new message (or revise `previous` with an admin instruction).
  * Tries Gemini (with one repair attempt if validation fails), then falls back to the rule-based drafter.
  */
-export async function draftWithAI(input: string, opts: AiOptions & { previous?: MarketDraft; instruction?: string } = {}): Promise<DraftResult> {
+export async function draftWithAI(input: string, opts: AiOptions & { previous?: MarketDraft; instruction?: string; fixtures?: boolean } = {}): Promise<DraftResult> {
+  if (opts.previous || opts.fixtures === false) return draftCore(input, opts);
+  const now = opts.now ?? Math.floor(Date.now() / 1000);
+  const text = input.replace(/^\/new(@\w+)?\s*/i, "").trim();
+  const ambiguous = ambiguousRelativeDay(text, now);
+  let matches: FixtureMatch[] = [];
+  try { matches = await lookupFixtures(text, now); } catch { matches = []; }
+  const said = saidDay(text, now);
+  if (matches.length > 1 && said) {
+    // Narrow by the day the admin said; just after midnight "tomorrow"/"tonight" could mean today or tomorrow.
+    const days = ambiguous ? [watDay(now), watDay(now + 86_400)] : [said];
+    const narrowed = matches.filter((m) => days.includes(watDay(m.fixture.kickoff)));
+    if (narrowed.length) matches = narrowed;
+  }
+  if (matches.length > 1) {
+    const list = matches.slice(0, 4).map((m) => `• ${m.fixture.home} v ${m.fixture.away}: ${fmtWat(m.fixture.kickoff)} (${m.fixture.league})`).join("\n");
+    return { kind: "clarify", question: `I found more than one match for that:\n${list}\nWhich one? Send /new again naming both teams or the day.` };
+  }
+  if (matches.length === 1) {
+    const f = matches[0].fixture;
+    const stripped = stripRelativeTime(text);
+    const r = await draftCore(`${stripped} | ${stamp(f.kickoff)}`, { ...opts, now, fixtureNote: `Official fixture (authoritative, from ESPN's schedule): ${f.home} v ${f.away}, ${f.league}, kick-off ${fmtWat(f.kickoff)}. Use exactly this kick-off; do not change it.` });
+    if (r.kind !== "draft") return r;
+    // If the AI's draft disagrees with the fixture (its rule text would carry the wrong time), use the rule-based draft built from the real kick-off.
+    const base = r.draft.eventStartTime === f.kickoff ? r.draft : draftMarket(`${stripped} | ${stamp(f.kickoff)}`, { now });
+    if (base !== r.draft) base.drafter = "rules";
+    return { kind: "draft", draft: pinFixture(base, f, text, now) };
+  }
+  if (ambiguous) {
+    const today = fmtDay(now), tomorrow = fmtDay(now + 86_400);
+    return { kind: "clarify", question: `It's just after midnight, so "${ambiguous}" could mean today (${today}) or ${tomorrow}. Do you mean today, ${today}, or ${tomorrow}? Send /new again with the day and kick-off time, e.g. /new ${stripRelativeTime(text)} ${today} 12:30pm` };
+  }
+  return draftCore(input, opts);
+}
+
+async function draftCore(input: string, opts: AiOptions & { previous?: MarketDraft; instruction?: string; fixtureNote?: string } = {}): Promise<DraftResult> {
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   let text = input.replace(/^\/new(@\w+)?\s*/i, "").trim();
   let when: string | undefined;
@@ -378,7 +414,7 @@ export async function draftWithAI(input: string, opts: AiOptions & { previous?: 
 
   const contents: unknown[] = opts.previous
     ? [{ role: "user", parts: [{ text: `Here is the current draft as JSON:\n${JSON.stringify(publicFields(opts.previous))}\n\nThe admin asks for this change: ${JSON.stringify(opts.instruction ?? input)}\nReturn the full revised market as JSON (keep everything else unless the change requires it).` }] }]
-    : [userTurn(text, when)];
+    : [userTurn(text, when, opts.fixtureNote)];
   const deadline = Date.now() + (opts.timeoutMs ? opts.timeoutMs * 3 : BUDGET_MS);
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -509,4 +545,54 @@ export async function splitNamed(question: string, names: string[], contest: str
     console.error("[pot] AI split fallback:", (e as Error).name === "AbortError" ? "timed out" : /HTTP (\d+)/.exec((e as Error).message)?.[0] ?? "error");
     return fallback;
   }
+}
+
+// ---------------------------------------------------------------- fixtures and relative days
+const WAT_OFF = 3600;
+const watHour = (u: number) => new Date((u + WAT_OFF) * 1000).getUTCHours();
+export const fmtDay = (u: number) => new Date(u * 1000).toLocaleDateString("en-GB", { timeZone: "Africa/Lagos", weekday: "short", day: "numeric", month: "short" });
+/** "10 Oct 2026 12:30" in WAT (a form the rule-based date parser reads exactly). */
+function stamp(u: number) {
+  const d = new Date((u + WAT_OFF) * 1000);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  return `${d.getUTCDate()} ${mon} ${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+const REL_RE = /\b(tomorrow|tmrw|tmr|tonight|today|this (?:morning|afternoon|evening))\b/i;
+/** Between 00:00 and 05:00 WAT, "tomorrow" / "tonight" could mean today or tomorrow. Returns the word, or null. */
+export function ambiguousRelativeDay(text: string, now: number): string | null {
+  const h = watHour(now);
+  if (h >= 5) return null;
+  const m = /\b(tomorrow|tmrw|tmr|tonight)\b/i.exec(text);
+  return m ? m[1].toLowerCase() : null;
+}
+/** The WAT day (YYYYMMDD) the admin named with today/tonight/tomorrow, if any. */
+function saidDay(text: string, now: number): string | null {
+  const m = REL_RE.exec(text);
+  if (!m) return null;
+  return /tom|tmr/i.test(m[1]) ? watDay(now + 86_400) : watDay(now);
+}
+export function stripRelativeTime(text: string): string {
+  return text.replace(new RegExp(REL_RE.source, "gi"), "")
+    .replace(/\b(at|by|from)?\s*\d{1,2}(:\d{2})?\s*(am|pm)\b/gi, "").replace(/\b(at\s+)?\d{1,2}:\d{2}\b/g, "")
+    .replace(/\s+([?.!,])/g, "$1").replace(/\s+/g, " ").trim();
+}
+/** Puts the fixture's real kick-off on the draft (buy close = kick-off), and says so, plainly, if it differs from the admin's day. */
+export function pinFixture(d: MarketDraft, f: Fixture, text: string, now: number): MarketDraft {
+  const k = f.kickoff;
+  const span = f.sport === "basketball" ? 3 * H : 2.5 * H;
+  const marketType: "breaking" | "standard" = k - now <= LIMITS.breakingWindowSec ? "breaking" : "standard";
+  const out: MarketDraft = {
+    ...d, timing: "event", eventStartTime: k, eventStartKnown: true, startTime: k,
+    endTime: Math.max(k + span, Math.min(d.endTime, k + 6 * H)),
+    marketType, creationFeeUsdc: LIMITS.fees[marketType], eventInProgress: false,
+  };
+  out.resolutionTime = Math.max(out.endTime + H, Math.min(d.resolutionTime, out.endTime + 24 * H));
+  const day = watDay(k) === watDay(now) ? "today" : watDay(k) === watDay(now + 86_400) ? "tomorrow" : "on";
+  const when = `${fmtDay(k)}, ${fmtWat(k).replace(/^.*, (\d{2}:\d{2}) WAT$/, "$1")} WAT`;
+  const said = saidDay(text, now);
+  const note = said && said !== watDay(k)
+    ? `📅 ${f.home} v ${f.away} is ${day === "on" ? "on" : day}, ${when}, per the fixture list (not ${REL_RE.exec(text)?.[1]?.toLowerCase() ?? "the day you said"}), so I used that.`
+    : `📅 ${f.home} v ${f.away} is ${day === "on" ? "on" : day}, ${when} (${f.league}, from the fixture list).`;
+  out.warnings = [note, ...(d.warnings ?? []).filter((w) => !/assumed|kick-?off|start time/i.test(w))];
+  return out;
 }
