@@ -13,7 +13,7 @@ export default async function Home() {
     <div className="space-y-10">
       <section className="py-6">
         <h1 className="text-3xl font-black leading-tight sm:text-4xl md:text-5xl">Your group chat already argues about everything.<br /><span className="text-amber-400">Now it can put a pot on it.</span></h1>
-        <p className="mt-4 max-w-2xl text-lg text-stone-300">Add <b>@pantapotbot</b> to your Telegram group. An admin types <code className="rounded bg-white/10 px-1">/new Will Tems win the Grammy?</code> and the bot drafts a fair market. Everyone buys YES or NO with one tap, and the group earns the creator royalty. Every card says honestly whether the odds mean anything yet.</p>
+        <p className="mt-4 max-w-2xl text-lg text-stone-300">Add <b>@pantapotbot</b> to your Telegram group. An admin types <code className="rounded bg-white/10 px-1">/new Will Tems win the Grammy?</code> and the bot drafts a fair market. Everyone buys YES or NO with one tap, and the group earns the creator royalty. When it resolves, Pot posts a receipt: who won or lost how much.</p>
         <div className="mt-6 flex flex-wrap gap-3">
           <a href="https://t.me/pantapotbot?startgroup=true" className="rounded-lg bg-amber-400 px-5 py-3 font-bold text-black">Add Pot to a group</a>
           <Link href="/leaderboard" className="rounded-lg border border-white/20 px-5 py-3 font-semibold">See the leaderboard</Link>
