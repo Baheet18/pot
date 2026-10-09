@@ -45,8 +45,9 @@ export async function POST(req: Request) {
     const r = await draftWithAI(demo, rules ? { key: null } : {});
     if (r.kind !== "draft") return Response.json(r);
     await upsertGroup(DEMO_CHAT, "Pot demo group");
-    const row = await saveDraft(DEMO_CHAT, 0, r.draft);
-    return Response.json({ draftId: row.id, token: sign({ d: row.id }, 3600), draft: r.draft });
+    const DEMO_ADMIN = 1; // not a real Telegram user; the create token is bound to it like a real admin's DM link
+    const row = await saveDraft(DEMO_CHAT, DEMO_ADMIN, r.draft);
+    return Response.json({ draftId: row.id, token: sign({ d: row.id, u: DEMO_ADMIN }, 3600), draft: r.draft });
   }
   if (settle?.id && (settle.outcome === "yes" || settle.outcome === "no")) {
     const pm = await getPracticeMarket(settle.id);
