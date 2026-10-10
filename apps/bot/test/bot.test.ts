@@ -5,7 +5,7 @@ import { Keypair } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { draftMarket, type MarketDraft } from "@pot/core";
-import { finishBuyPractice, finishCreatePractice, getDraft, linkGroupMarket, linkWallet, recordBuy, resetDbForTests, saveDraft, signRef, startBuy, startCreate, upsertGroup, verify } from "@pot/server";
+import { setLiveFetcher, finishBuyPractice, finishCreatePractice, getDraft, linkGroupMarket, linkWallet, recordBuy, resetDbForTests, saveDraft, signRef, startBuy, startCreate, upsertGroup, verify } from "@pot/server";
 
 type Sent = { method: string; payload: any };
 type U = { id: number; is_bot: boolean; first_name: string; username?: string };
@@ -348,5 +348,41 @@ describe("AI drafting in the bot", () => {
     expect(b.sent.filter((s) => s.method === "editMessageText").at(-1)!.payload.text).toContain("two or more goals");
     await b.msg("title: Arsenal by 2+", ADMIN, GROUP, previewId);
     expect(calls).toHaveLength(2); // field edit didn't call the AI
+  });
+});
+
+describe("live Panta markets in the chat (read-only, practice mode)", () => {
+  const now = Math.floor(Date.now() / 1000);
+  const items = [
+    { marketId: "CLQqZ7r6WYC5xNumWrmC7UAkQ1Z6pdCbjJSy7wQu1DgL", title: "Will BTC reach a new all-time high by December 31, 2026?", phase: "primary", status: "primary", resolved: false, yesPrice: "0.52", noPrice: "0.48", totalVolumeUsdc: "6.00", startTime: now + 7200, endTime: now + 9e6, category: "crypto" },
+  ];
+  const mock = (list: unknown[]) => setLiveFetcher((async () => new Response(JSON.stringify({ items: list }), { status: 200 })) as any);
+
+  it("/panta lists real markets with prices, a 'Live on Panta' label, a Panta link and a post button; admins post one", async () => {
+    mock(items);
+    const b = makeBot([7]);
+    await b.msg("/panta", MEMBER);
+    const card = b.replies()[1];
+    expect(card.text).toContain("🔴 <b>Live on Panta</b>");
+    expect(card.text).toContain("YES 52¢ · NO 48¢ · Pot $6.00");
+    expect(card.text).toMatch(/Buying closes .* WAT/);
+    expect(card.text).toMatch(/practice mode, so it takes no buys here/);
+    const btns = card.reply_markup.inline_keyboard.flat();
+    expect(btns[0]).toMatchObject({ text: "Trade on Panta ↗", url: "https://www.panta.market/market/CLQqZ7r6WYC5xNumWrmC7UAkQ1Z6pdCbjJSy7wQu1DgL" });
+    expect(btns[1].callback_data).toBe("lp:CLQqZ7r6WYC5xNumWrmC7UAkQ1Z6pdCbjJSy7wQu1DgL");
+    await b.tap(btns[1].callback_data, MEMBER);
+    expect(b.sent.filter((x) => x.method === "answerCallbackQuery").at(-1)!.payload.text).toMatch(/Only group admins/);
+    await b.tap(btns[1].callback_data);
+    expect(b.replies().at(-1).text).toMatch(/^📌 Posted by an admin\n🔴 <b>Live on Panta<\/b>/);
+    await b.msg("/post CLQqZ7r6WYC5xNumWrmC7UAkQ1Z6pdCbjJSy7wQu1DgL");
+    expect(b.replies().at(-1).text).toContain("Live on Panta");
+    setLiveFetcher(null);
+  });
+  it("says so plainly when Panta has no open markets", async () => {
+    mock([]);
+    const b = makeBot([7]);
+    await b.msg("/panta", MEMBER);
+    expect(b.replies()[0].text).toMatch(/No live Panta markets are open right now/);
+    setLiveFetcher(null);
   });
 });

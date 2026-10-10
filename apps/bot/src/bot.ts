@@ -4,7 +4,7 @@ import { esc, findDeadline, fmtWat, formatReceiptHtml, receiptDue, renderCard, v
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
-  walletsFor, claimSlot, type BuyRow, kvPut, kvTake, kvDelete, parseNames, splitNamed, consumeNameClaim, receiptFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
+  walletsFor, listLivePanta, getLivePanta, type LiveMarket, claimSlot, type BuyRow, kvPut, kvTake, kvDelete, parseNames, splitNamed, consumeNameClaim, receiptFor, saveChoice, getChoice, updateChoice, type DraftChoice, buildReceipt, claimReceipt, setReceiptMessage, releaseReceipt, groupsForMarket, practiceMarketsForChat, settlePracticeMarket, blinkPreviewFor, shareTextFor, xShareFor, WEB_URL, listOpenViews, type MarketView, draftWithAI, applyEdit, draftByMessage, latestOpenDraft, EDIT_FIELDS, type DraftResult,
 } from "@pot/server";
 
 /**
@@ -16,6 +16,7 @@ export const COMMANDS = [
   { command: "new", description: "Draft a market: /new Will Nigeria beat Benin Fri 5pm?" },
   { command: "edit", description: "Tweak your draft: /edit ends 31 May 2027 23:00" },
   { command: "markets", description: "Markets in this group" },
+  { command: "panta", description: "Live Panta markets with real prices" },
   { command: "share", description: "Your personal share links for a market" },
   { command: "top", description: "Leaderboard: who brought new traders" },
   { command: "mine", description: "Your positions and winnings to claim" },
@@ -41,6 +42,25 @@ function isGroup(ctx: Context) {
 
 /** Telegram's stand-in sender for admins posting with "Remain anonymous" on. */
 export const ANON_ADMIN_ID = 1087968824;
+
+const cents = (p: number | null) => (p === null ? "–" : `${Math.round(p * 100)}¢`);
+/** A card for a real, live Panta market (read-only data). Pot never takes a buy on it: trading happens on Panta. */
+export function liveCard(m: LiveMarket, opts: { post?: boolean } = {}): { text: string; reply_markup: InlineKeyboard } {
+  const when = m.phase === "primary"
+    ? `⏳ Buying closes ${fmtWat(m.buyingClosesAt)}`
+    : `📈 Buying closed: now trading on Panta's order book until ${fmtWat(m.endsAt)}`;
+  const text = [
+    `🔴 <b>Live on Panta</b>${m.category ? ` · ${esc(m.category)}` : ""}`,
+    `<b>${esc(m.title)}</b>`,
+    `YES ${cents(m.yesPrice)} · NO ${cents(m.noPrice)} · Pot ${usd(m.potUsdc)}`,
+    when,
+    SANDBOX ? "<i>Real Panta market and real prices. Pot is in practice mode, so it takes no buys here: trade on Panta, or make a free practice market with /new.</i>" : "",
+    "Powered by Panta",
+  ].filter(Boolean).join("\n");
+  const kb = new InlineKeyboard().url("Trade on Panta ↗", m.url);
+  if (opts.post) kb.row().text("📌 Post in this group", `lp:${m.id}`);
+  return { text, reply_markup: kb };
+}
 /** A post made as the group itself (anonymous admin via GroupAnonymousBot, sender_chat = this group) can only come from an admin. */
 export function isAnonymousAdmin(ctx: Context): boolean {
   return isGroup(ctx) && !!ctx.chat && ctx.msg?.sender_chat?.id === ctx.chat.id;
@@ -181,7 +201,8 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
     "",
     "When a market resolves I post a receipt: the result, the final pot, and who won or lost how much.",
     SANDBOX ? "Practice markets have no oracle, so the group admin settles them after the event: <code>/settle yes</code> or <code>/settle no</code>." : "",
-    "Commands: /new /markets /share /top /mine /link /admin" + (SANDBOX ? " /settle" : ""),
+    "Live Panta markets with real prices: /panta",
+    "Commands: /new /markets /panta /share /top /mine /link /admin" + (SANDBOX ? " /settle" : ""),
   ].join("\n");
 
   bot.command(["start", "help"], async (ctx) => {
@@ -358,7 +379,7 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       return;
     }
     const open = (await listOpenViews(8).catch(() => [])).slice(0, 3);
-    if (!open.length) return ctx.reply("No open markets yet. An admin can start one with /new.");
+    if (!open.length) return ctx.reply("No open markets in this chat yet. An admin can start one with /new, or see real Panta markets with /panta.");
     await ctx.reply(SANDBOX
       ? `No markets in this chat yet. An admin can start one with /new. Meanwhile, here are practice markets from other groups:`
       : `No markets in this chat yet. Here are open Panta markets (admins: <code>/post &lt;id&gt;</code> to pin one here):`, { parse_mode: "HTML" });
@@ -366,13 +387,38 @@ export function createBot(token: string, opts: { botInfo?: UserFromGetMe; drafte
       const m = cardMessage(cardFor(v, groupRef(ctx)));
       await ctx.reply(`${m.text}\n<code>${v.market.id}</code>`, { parse_mode: "HTML", reply_markup: m.reply_markup, link_preview_options: { is_disabled: true } });
     }
+    await ctx.reply("🔴 Real markets on Panta right now: /panta");
+  });
+
+  // Real, live Panta markets (read-only), even in practice mode.
+  bot.command("panta", async (ctx) => {
+    const list = await listLivePanta(5);
+    if (!list.length) return ctx.reply("No live Panta markets are open right now (or Panta didn't answer). Browse https://www.panta.market, or make a practice market here with /new.", { link_preview_options: { is_disabled: true } });
+    await ctx.reply(`🔴 <b>Live on Panta now</b> (${list.length} open market${list.length > 1 ? "s" : ""}, real prices). Admins can pin one with 📌.`, { parse_mode: "HTML" });
+    for (const m of list) {
+      const c = liveCard(m, { post: isGroup(ctx) });
+      await ctx.reply(c.text, { parse_mode: "HTML", reply_markup: c.reply_markup, link_preview_options: { is_disabled: true } });
+    }
+  });
+  bot.callbackQuery(/^lp:([1-9A-HJ-NP-Za-km-z]{32,44})$/, async (ctx) => {
+    if (!(await isAdmin(ctx))) return ctx.answerCallbackQuery({ text: "Only group admins can post markets." });
+    const m = await getLivePanta(ctx.match[1]);
+    if (!m) return ctx.answerCallbackQuery({ text: "That market isn't open on Panta any more." });
+    await ctx.answerCallbackQuery({ text: "Posted" });
+    const c = liveCard(m);
+    await ctx.reply(`📌 Posted by an admin\n${c.text}`, { parse_mode: "HTML", reply_markup: c.reply_markup, link_preview_options: { is_disabled: true } });
   });
 
   bot.command("post", async (ctx) => {
     if (!ctx.chat) return;
     const id = ctx.match?.toString().trim();
-    if (!id || !isMarketId(id)) return ctx.reply("Usage: /post <marketId>");
+    if (!id || !isMarketId(id)) return ctx.reply("Usage: /post <marketId> (see /panta for live Panta markets)");
     if (!(await isAdmin(ctx))) return ctx.reply("Only group admins can post markets.");
+    if (SANDBOX) {
+      // Practice mode: a real Panta id is shown as a read-only live card (Pot doesn't track or take buys on it).
+      const live = await getLivePanta(id);
+      if (live) { const c = liveCard(live); return ctx.reply(c.text, { parse_mode: "HTML", reply_markup: c.reply_markup, link_preview_options: { is_disabled: true } }); }
+    }
     const msg = await sendCard(ctx, id, groupRef(ctx));
     if (isGroup(ctx) && msg && "message_id" in msg) await linkGroupMarket(ctx.chat.id, id, { cardMessageId: msg.message_id });
   });

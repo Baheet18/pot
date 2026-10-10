@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { listOpenViews, topGroups, totals } from "@pot/server";
-import { fmtUsd } from "@pot/core";
+import { listLivePanta, listOpenViews, topGroups, totals, type LiveMarket } from "@pot/server";
+import { fmtUsd, fmtWat } from "@pot/core";
 import { MarketCard } from "@/components/MarketCard";
 import { EmptyBuys } from "@/components/EmptyBuys";
 import { SANDBOX } from "@/lib/ui";
@@ -8,7 +8,7 @@ import { SANDBOX } from "@/lib/ui";
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [views, t, board] = await Promise.all([listOpenViews(12).catch(() => []), totals(), topGroups(5).catch(() => [])]);
+  const [views, t, board, live] = await Promise.all([listOpenViews(12).catch(() => []), totals(), topGroups(5).catch(() => []), listLivePanta(6).catch((): LiveMarket[] => [])]);
   return (
     <div className="space-y-10">
       <section className="py-6">
@@ -36,6 +36,23 @@ export default async function Home() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">{views.map((v) => <MarketCard key={v.market.id} v={v} />)}</div>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-1 text-xl font-bold">Live on Panta <span className="ml-2 align-middle text-xs font-semibold text-rose-300">🔴 real markets, real prices</span></h2>
+        <p className="mb-3 text-sm text-stone-400">Straight from Panta&apos;s live API (read-only). Trade them on Panta; in Telegram, <code className="rounded bg-white/10 px-1">/panta</code> shows these and lets an admin post one to the group.</p>
+        {live.length === 0 ? (
+          <div className="card p-5 text-sm text-stone-300">No live Panta markets are open right now. Browse <a className="underline" href="https://www.panta.market">panta.market</a>, or make a practice market in your group with <code className="rounded bg-white/10 px-1">/new</code>.</div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">{live.map((m) => (
+            <a key={m.id} href={m.url} target="_blank" rel="noopener" className="card block p-4 hover:border-white/30">
+              <div className="text-xs font-semibold uppercase text-rose-300">🔴 Live on Panta{m.category ? ` · ${m.category}` : ""}</div>
+              <div className="mt-1 font-bold">{m.title}</div>
+              <div className="mt-2 text-sm text-stone-300">YES {m.yesPrice === null ? "–" : `${Math.round(m.yesPrice * 100)}¢`} · NO {m.noPrice === null ? "–" : `${Math.round(m.noPrice * 100)}¢`} · Pot {fmtUsd(m.potUsdc)}</div>
+              <div className="mt-1 text-xs text-stone-400">{m.phase === "primary" ? `Buying closes ${fmtWat(m.buyingClosesAt)}` : `Order-book trading until ${fmtWat(m.endsAt)}`} · Trade on Panta ↗</div>
+            </a>
+          ))}</div>
         )}
       </section>
 

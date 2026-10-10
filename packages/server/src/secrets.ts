@@ -22,13 +22,14 @@ export const SECRET_PATHS = {
 const memo = new Map<string, string>();
 
 function readSecret(file: string, validate: (s: string) => boolean, label: string, envName?: string): string {
-  const hit = memo.get(file);
+  const mk = `${file}|${envName ?? ""}`;
+  const hit = memo.get(mk);
   if (hit) return hit;
   if (!existsSync(/*turbopackIgnore: true*/ file)) {
     const v = envName ? process.env[envName]?.trim() : undefined;
     if (v) {
       if (!validate(v)) throw new Error(`${label} (env ${envName}) does not look valid.`);
-      memo.set(file, v);
+      memo.set(mk, v);
       return v;
     }
     throw new Error(`${label} not configured (file ${file} or env ${envName ?? "-"}).`);
@@ -36,7 +37,7 @@ function readSecret(file: string, validate: (s: string) => boolean, label: strin
   checkPermissions(file, label);
   const v = readFileSync(/*turbopackIgnore: true*/ file, "utf8").trim();
   if (!validate(v)) throw new Error(`${label} file ${file} does not look valid.`);
-  memo.set(file, v);
+  memo.set(mk, v);
   return v;
 }
 
@@ -96,4 +97,14 @@ export function checkPermissions(file: string, label: string, platform: string =
   }
   const mode = statSync(/*turbopackIgnore: true*/ file).mode & 0o777;
   if (mode & 0o077) throw new Error(`${label} file ${file} must be chmod 600.`);
+}
+
+/**
+ * Read-only Panta key for showing live markets in practice mode: env PANTA_READ_KEY (Vercel) or ~/.panta/api_key locally.
+ * Only `livepanta.ts` uses it, and that module can only send GETs. Live writes stay behind POT_ALLOW_LIVE_WRITES.
+ */
+export function pantaReadKey(): string | null {
+  try {
+    return readSecret(process.env.PANTA_READ_KEY_FILE || SECRET_PATHS.pantaLive, (s) => /^pk_live_[A-Za-z0-9_-]+$/.test(s), "Panta read-only key", "PANTA_READ_KEY");
+  } catch { return null; }
 }
