@@ -4,13 +4,17 @@
 
 Built by Baheet Adeniji for the Panta API Sidetrack, Colosseum Crypto World's Fair.
 
+> **In one line:** any debate in a group chat becomes a Panta market (BBNaija evictions, elections, celebrity news, movies, music releases and streams, football), Pot gives Panta distribution into those chats, and the community owner earns the creator's cut.
+>
+> **Honest status:** this is a sandbox submission. Buying runs in practice mode (no real money). Pot already shows **real, live Panta markets and prices** in the chat, every live call has been checked read-only, the full flow runs end to end in Panta's sandbox, and live mode is one switch away ([`GO-LIVE.md`](https://github.com/Baheet18/pot/blob/main/GO-LIVE.md)). The demo video shows the live flow at launch.
+
 ---
 
 ## The problem
 
 Every group chat already runs prediction markets. They just don't have a place to put them.
 
-"Super Eagles will lose." "BTC hits 150k by December." "Obi joins ADC before the year ends." Someone says it, five people disagree, and someone says "bet?" Then nothing happens. Nobody writes the bet down, nobody agrees on what counts as a win, nobody holds the money, and a week later nobody remembers who said what.
+"Your fave is getting evicted on Sunday." "That album does 100M streams in week one." "Obi joins ADC before the year ends." "Super Eagles will lose." Someone says it, five people disagree, and someone says "bet?" Then nothing happens. Nobody writes the bet down, nobody agrees on what counts as a win, nobody holds the money, and a week later nobody remembers who said what.
 
 Panta has the hard parts: real markets on Solana, a fair payout rule, a creator's cut for whoever makes the market, and a clean API. What it needs is people in the markets. A market is only fun when your friends are on the other side, and most of Panta's markets today have very little money in them.
 
@@ -37,7 +41,7 @@ That receipt is the point. It's the thing people screenshot. It turns "I told yo
 
 The bigger idea: **every Telegram group can become a Panta venue.**
 
-A football fan group, a crypto trading chat, a church youth group, a campus group, a fantasy league. Most of all, an influencer's community: a creator with 20,000 people in a Telegram channel and a group can run a market every match day, share it on X as a Blink, and earn the creator's cut on every one.
+Any debate can become a market: BBNaija and reality-TV evictions, elections and politics, celebrity news, movie box office, music releases and streaming numbers, football. So any community can host them: a BBNaija fan group, a music stan chat, a football group, a politics chat, a campus group, a fantasy league. Most of all, an influencer's community: a creator with 20,000 people in a Telegram channel and a group can run a market every match day, share it on X as a Blink, and earn the creator's cut on every one.
 
 For Panta, that means:
 - **New people.** Each group brings its own members. Pot marks buys that are someone's first-ever Panta trade.
@@ -47,35 +51,36 @@ For Panta, that means:
 
 Pot doesn't compete with Panta's website. It brings people to Panta's markets from the places they already spend time.
 
-## How deep the Panta integration goes
+## Every Panta API feature, and where Pot uses it
 
-Pot uses Panta's API for the whole life of a market: making it, buying into it, following it, settling it and claiming from it. All calls go to `https://live-api.panta.market/api/v1` from the server, with the API key kept server-side.
+All calls go from Pot's server to `https://live-api.panta.market/api/v1`; the API key never reaches the browser or the bot chat.
 
-**Reading markets and positions**
-| Endpoint | What Pot uses it for |
-|---|---|
-| `GET /markets/` | Open markets list on the website and `/markets` in the bot |
-| `GET /markets/{id}/` | Market card, market page, Blink, settlement checks |
-| `GET /markets/{id}/trades/` | Who bought which side; the YES/NO split; the receipt |
-| `GET /positions/?wallet=` | `/mine` (your positions) and claim links |
-| `GET /wallets/{wallet}/trades/` | Spotting a wallet's first-ever Panta trade |
-| `GET /trades/{signature}/` | Confirming a single buy |
+| Panta feature | Endpoints | Where Pot uses it |
+|---|---|---|
+| Market data | `GET /markets/` · `GET /markets/{id}/` · `GET /markets/{id}/trades/` | **Live Panta markets in the chat (`/panta`)** and on the home page; market cards and pages; Blinks; the YES/NO split; receipts; settlement checks |
+| Positions | `GET /positions/?wallet=` · `GET /wallets/{wallet}/trades/` | `/mine`, claim links, spotting a wallet's first-ever Panta trade |
+| Primary-market buys | `POST /primaryorderquote/` → `/primaryorderbuild/` → wallet signs → `/primaryordersubmit/` → `/primaryorderverify/` | Buy YES / Buy NO on the market page and in Blinks on X |
+| Attribution (referrals) | `POST /trades/` with `userId` / `X-User-Id` | Credits each buy to the group's card or the member's share link; powers `/top` |
+| Market creation | `POST /markets/create/quote/` → `/markets/create/build/` → admin signs and pays → `/markets/register/` | Admin taps Create on a `/new` draft and becomes the Panta creator (fee checked against $20 breaking / $50 standard) |
+| Claims | `POST /claim/build/` · `POST /claim/creator-fees/build/` | Winners' claim links; the community owner claims the creator's cut |
+| Payout rules (how-it-works) | Pool rule, royalty curve (20% → 10% → 5% → 0%), 2% fee, 1-hour dispute window | Payout estimates, `/admin` royalty estimate, receipts |
 
-**Buying (the user signs in their own wallet)**
-`POST /primaryorderquote/` → `POST /primaryorderbuild/` → wallet signs and sends → `POST /primaryordersubmit/` → `POST /primaryorderverify/` → `POST /trades/` (credits the buy to the group or member link through `userId` / `X-User-Id`)
-
-**Making a market (the admin signs and pays the Panta fee)**
-`POST /markets/create/quote/` → `POST /markets/create/build/` → wallet signs → `POST /markets/register/`
-
-**Claiming**
-`POST /claim/build/` (winnings) · `POST /claim/creator-fees/build/` (the creator's cut) → `POST /trades/` report
-
-That's 16 endpoints across the full flow. A few things Pot does on top:
+That's 15 endpoints across the whole life of a market. A few things Pot does on top:
 - **Follows Panta's rules exactly.** Payout estimates use Panta's pool rule, including the creator's cut dropping when one side is crowded, the 2% trading fee on live buys, and the fact that one-sided markets don't get refunds. Receipts say "approx" because Panta sets final payouts after its 1-hour dispute window.
 - **Checks Panta's numbers before asking anyone to sign.** If Panta quotes a creation fee other than the expected $20 (breaking) or $50 (standard), Pot stops. It also checks the buyer has enough USDC and SOL first, and says what's missing in plain words.
 - **Turns Panta's error codes into plain sentences.** For example, `NOT_CLAIMABLE` and `DUPLICATE_MARKET` get a human explanation.
+- **Shows live Panta markets in practice mode, read-only.** A separate read-only key (`PANTA_READ_KEY`) can only send GETs; it is not the live-write key, and the live-write lock stays off.
 - **Is a polite API client.** Reads are rate-limited under Panta's limit and cached. Only the POST paths above can be called at all, and with a live key every write is blocked unless a second switch is turned on.
 - **Uses Panta's referral field.** Every buy through a group's card or a member's Blink link carries that group's or member's ref, which powers the `/top` leaderboard.
+
+## Live Panta data, now in the chat
+
+Even in practice mode, groups see the real thing:
+- **`/panta`** lists Panta's open live markets with their real YES/NO prices, pot and closing time (in Lagos time). Markets still in their buying window come first.
+- Each one is a card labelled **🔴 Live on Panta** with a **Trade on Panta ↗** button that opens the market on panta.market. An admin can tap **📌 Post in this group** (or `/post <marketId>`) to pin it in the group.
+- Pot takes no buys on these cards while it's in practice mode, and says so on the card. Members trade on Panta, or make a free practice market with `/new`.
+- The home page at https://pot-navy.vercel.app shows the same **Live on Panta** list.
+- When Panta has few or no open markets, the bot and the website say so plainly and point to panta.market and `/new`.
 
 ## The UX
 
@@ -92,15 +97,17 @@ Pot is built for a phone in a busy group chat.
 - **Credit where it's due.** `/link` connects your wallet to your Telegram name with a free signed message, so website and Blink buys show your name on the receipt. `/mine` shows your positions privately in DM. `/top` and the website leaderboard show who brings the most buyers.
 - **The receipt.** One message per market, posted in the group: result, final pot, the creator's cut, and every member's side, stake and payout. One-sided markets get their own wording, because nobody really won or lost.
 
-## Practice mode vs live mode: an honest note
+## An honest sandbox submission: practice mode vs live mode
 
 **Pot runs in practice mode today. No real money moves.** I chose not to put real money in for this hackathon.
 
 What that means in plain terms:
 - **Practice mode** uses Panta's test API key. Markets a group makes in practice mode are practice markets: Pot keeps track of their pot using Panta's payout rules, wallets sign a free message instead of a payment, and a group admin settles them with `/settle yes` or `/settle no` after the event (practice markets have no automatic result). The bot, the website, the Blinks, the leaderboard, `/mine`, `/link` and the receipts all work for real people, in real groups, on real phones. Every practice screen is clearly labelled "practice, no real money".
 - **Live mode is fully built.** It runs the real Panta flows listed above with the live key: real market creation, real buys, settlement from Panta's own result, and claims. It turns on with one command (`scripts/go-live.sh`) and turns off with another (`scripts/rollback-to-practice.sh`). Two separate switches must both be on before any real-money call can reach Panta.
-- **What's been checked against Panta's live API**, with read-only calls and nothing signed or sent: buy quotes and builds (including the 2% fee), market-creation quotes and builds ($20 = 20,000,000 base units, of which $5 goes into the market), market lists, details and trades, and the error codes.
+- **How it's been checked.** `scripts/sandbox-e2e.ts` runs the whole flow end to end against Panta's sandbox (draft → create → buys → settle → receipt). `scripts/live-probe.mts` makes read-only calls to Panta's live API, with nothing signed or sent, and confirms: buy quotes and builds (including the 2% fee), market-creation quotes and builds ($20 = 20,000,000 base units, of which $5 goes into the market), market lists, details and trades, and the error codes.
 - **What can only be checked with real money:** signing and sending on mainnet, Panta's submit → verify → confirmed sequence, buy credit through `/trades/`, registering a real market, real settlement timing and the dispute window, and claims. The full go-live checklist and a ~$21 smoke test are in [`GO-LIVE.md`](https://github.com/Baheet18/pot/blob/main/GO-LIVE.md).
+- **Live mode is one switch away.** `scripts/go-live.sh` sets the live env vars on Vercel and redeploys; `scripts/rollback-to-practice.sh` undoes it. `/api/pot/ready` reports whether every go-live setting is in place, without showing any secret.
+- **The demo video shows the live flow at launch**: a real market created, bought and settled with real USDC once Pot is switched on. [LOOM LINK HERE]
 
 ## Traction (practice mode)
 
@@ -134,7 +141,7 @@ I'm not claiming volume I don't have. Instead, I'm running practice markets with
 - **Blinks:** Pot serves its own Solana Actions (`/actions.json` and `/api/actions/m/[id]`), so a market link on X shows buy buttons in Phantom or Backpack.
 - **AI drafting:** a language model writes the draft as structured data; Pot checks it on the server, with a rule-based fallback.
 - **Storage:** Postgres (Neon) when hosted, SQLite locally. Every row is tagged practice or live, so the two never mix.
-- **Tests:** 153 automated tests (14 files) across the core logic, the server (Panta responses mocked) and the bot (fake Telegram updates).
+- **Tests:** 177 automated tests (17 files) across the core logic, the server (Panta responses mocked) and the bot (fake Telegram updates).
 
 ---
 

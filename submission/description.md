@@ -4,12 +4,12 @@
 Pot turns group-chat arguments into Panta prediction markets, right inside Telegram.
 
 ## Short description (about 50 words)
-Pot is a Telegram bot and website that turns a group chat's arguments into Panta prediction markets on Solana. An admin types /new, AI drafts a fair YES/NO market, and members back a side from their phone with Phantom or a Blink. When it settles, the group gets a receipt, and the creator earns Panta's creator's cut.
+Pot turns any group-chat debate (BBNaija, elections, celebrity news, movies, music streams, football) into a Panta prediction market. An admin types /new, AI drafts a fair YES/NO market, members back a side from their phones, and the group gets a receipt. Pot gives Panta distribution; community owners earn the creator's cut.
 
-(57 words)
+(50 words)
 
 ## Even shorter (for a form field with a tight limit)
-Telegram groups make Panta markets with /new, buy from their phones, and get a receipt when they settle. The group owner earns the creator's cut.
+Any group-chat debate becomes a Panta market. Groups make one with /new, back a side from their phones, and get a receipt. The community owner earns the creator's cut.
 
 ## Links
 - Code: https://github.com/Baheet18/pot
@@ -19,4 +19,7 @@ Telegram groups make Panta markets with /new, buy from their phones, and get a r
 - Deck: [DECK LINK HERE]
 
 ## Honest status line (put this wherever the form asks about status)
-Runs in practice mode today: no real money moves. Real-money (live) mode is built, checked against Panta's live API with read-only calls, and switches on with one command.
+Honest sandbox submission: buying runs in practice mode, so no real money moves. The chat already shows real, live Panta markets and prices (/panta). The full flow runs end to end in Panta's sandbox (scripts/sandbox-e2e.ts), the live API has been checked with read-only calls (scripts/live-probe.mts), and live mode is one switch away (GO-LIVE.md). The demo video shows the live flow at launch.
+
+## Traction (fill in before submitting)
+[N] groups · [N] practice markets · [N] people who bought · [N] receipts posted. Replace with real numbers or delete.

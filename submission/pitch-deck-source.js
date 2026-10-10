@@ -45,18 +45,18 @@ pres.author = 'Baheet Adeniji'; pres.title = 'Pot: prediction markets for your g
   stripes(s, M, 0.7, 1.0, 0.22);
   tx(s, 'POT', { x: M, y: 1.4, w: 7, h: 1.5, fontFace: F.head, fontSize: 96, color: C.yellow });
   tx(s, 'Prediction markets for your group chat, powered by Panta', { x: M, y: 3.05, w: 7, h: 1.2, fontFace: F.head, fontSize: 26, color: 'FFFFFF' });
-  tx(s, 'Telegram groups turn their arguments into Panta markets, back a side from their phones, and get a receipt when they settle.', { x: M, y: 4.4, w: 6.6, h: 1.0, fontSize: 16, color: C.ink });
+  tx(s, 'Any debate in a group chat becomes a Panta market: BBNaija, elections, celebrity news, movies, music drops and streams, football. Members back a side from their phones and get a receipt when it settles.', { x: M, y: 4.3, w: 6.8, h: 1.3, fontSize: 15, color: C.ink });
   tx(s, [{ text: 'Baheet Adeniji', options: { bold: true, color: 'FFFFFF', breakLine: true } }, { text: '@pantapotbot  ·  pot-navy.vercel.app  ·  github.com/Baheet18/pot', options: { breakLine: true } }, { text: 'Panta API Sidetrack · Colosseum Crypto World\'s Fair' }], { x: M, y: 5.75, w: 7, h: 1.1, fontSize: 13, color: C.muted, paraSpaceAfter: 3 });
 }
 
 /* 2 Problem */
 { const s = base(pres, 2);
   title(s, ['Every group chat says ', ['"bet?"'], ' Then nothing happens.']);
-  const qs = ['"Man U will lose on Saturday."', '"BTC hits 150k by December."', '"Obi joins ADC before 2027."'];
+  const qs = ['"Your fave is getting evicted this Sunday."', '"That album does 100M streams in week one."', '"Super Eagles will lose on Saturday."'];
   qs.forEach((q, i) => { const y = 2.35 + i * 1.05;
     s.addShape('roundRect', { x: M, y, w: 5.6, h: 0.8, rectRadius: 0.12, fill: { color: i === 1 ? C.navy : C.panel } });
     tx(s, q, { x: M + 0.3, y: y + 0.22, w: 5.2, h: 0.4, fontSize: 18, color: 'FFFFFF', italic: true }); });
-  tx(s, 'Nobody writes it down. Nobody agrees what counts. Nobody holds the money.', { x: M, y: 5.6, w: 5.8, h: 0.8, fontSize: 15, color: C.muted });
+  tx(s, 'BBNaija, elections, celebrity news, movies, music, football: nobody writes it down, agrees what counts, or holds the money.', { x: M, y: 5.6, w: 5.8, h: 0.9, fontSize: 15, color: C.muted });
   s.addShape('line', { x: 7.0, y: 2.35, w: 0, h: 4.0, line: { color: C.line, width: 1 } });
   tx(s, 'Meanwhile, on Panta', { x: 7.5, y: 2.35, w: 5.2, h: 0.4, fontFace: F.head, fontSize: 18, color: C.yellow });
   tx(s, [
@@ -127,26 +127,29 @@ pres.author = 'Baheet Adeniji'; pres.title = 'Pot: prediction markets for your g
   tx(s, 'Demo receipt from Pot\'s test group (practice money).', { x, y: 6.5, w: tw, h: 0.3, fontSize: 10, color: C.muted });
 }
 
-/* 7 Integration depth: big number + flows */
+/* 7 Integration depth: every Panta API feature and where Pot uses it */
 { const s = base(pres, 7);
-  title(s, ['Built on Panta\'s API for the ', ['whole life'], ' of a market']);
-  tx(s, '16', { x: M, y: 2.2, w: 3.2, h: 1.9, fontFace: F.head, fontSize: 120, color: C.yellow });
-  tx(s, 'Panta endpoints used, from making a market to claiming the creator\'s cut', { x: M, y: 4.2, w: 3.3, h: 1.1, fontSize: 15 });
-  tx(s, 'Rate-limited and cached reads. Only allow-listed writes. A second lock blocks every live write until it\'s switched on.', { x: M, y: 5.45, w: 3.3, h: 1.2, fontSize: 12, color: C.muted });
-  const rows = [['Read', 'GET /markets/ · /markets/{id}/ · /markets/{id}/trades/ · /positions/ · /wallets/{w}/trades/ · /trades/{sig}/'],
-    ['Buy', 'primaryorderquote → primaryorderbuild → wallet signs → primaryordersubmit → primaryorderverify → /trades/ (credits the group\'s link)'],
-    ['Create', 'markets/create/quote → markets/create/build → admin signs and pays → markets/register'],
-    ['Claim', 'claim/build (winnings) · claim/creator-fees/build (creator\'s cut) → /trades/ report']];
-  const tbl = rows.map((r, i) => [
-    { text: r[0], options: { bold: true, color: C.bg, fill: { color: C.yellow }, fontFace: F.head, fontSize: 15, valign: 'middle', align: 'center' } },
-    { text: r[1], options: { color: C.ink, fill: { color: i % 2 ? C.bg : C.panel }, fontSize: 13, valign: 'middle', fontFace: F.body } }]);
-  s.addTable(tbl, { x: 4.4, y: 2.35, w: 8.33, colW: [1.35, 6.98], rowH: 0.98, border: { type: 'solid', pt: 1, color: C.line }, margin: 0.12 });
+  title(s, ['Every Panta API feature, and ', ['where Pot uses it']], { fontSize: 30 });
+  tx(s, '15', { x: M, y: 2.1, w: 3.0, h: 1.7, fontFace: F.head, fontSize: 110, color: C.yellow });
+  tx(s, 'Panta endpoints, from making a market to claiming the creator\'s cut', { x: M, y: 3.9, w: 3.1, h: 1.0, fontSize: 14 });
+  tx(s, 'Checked read-only against the live API (scripts/live-probe.mts). Full flow runs end to end in the sandbox (scripts/sandbox-e2e.ts). 177 automated tests.', { x: M, y: 5.0, w: 3.1, h: 1.6, fontSize: 12, color: C.muted });
+  const rows = [['Panta feature', 'Endpoints', 'Where Pot uses it'],
+    ['Market data', 'GET /markets/ · /markets/{id}/ · /markets/{id}/trades/', 'Live cards in chat (/panta), home page, market page, receipts'],
+    ['Positions', 'GET /positions/ · /wallets/{w}/trades/', '/mine, claim links, "first-ever Panta trade"'],
+    ['Primary buys', 'primaryorderquote → build → submit → verify', 'Buy YES/NO on the web page and in Blinks on X'],
+    ['Attribution', 'POST /trades/ (userId)', 'Credit to the group and member link, /top'],
+    ['Market creation', 'markets/create/quote → build → register', 'Admin taps Create; fee checked against $20 / $50'],
+    ['Claims', 'claim/build · claim/creator-fees/build', 'Winnings and the community owner\'s creator cut']];
+  const tbl = rows.map((r, i) => r.map((t, j) => ({ text: t, options: i === 0
+    ? { bold: true, color: C.bg, fill: { color: C.yellow }, fontFace: F.head, fontSize: 12, valign: 'middle' }
+    : { color: j === 0 ? 'FFFFFF' : C.ink, bold: j === 0, fill: { color: i % 2 ? C.bg : C.panel }, fontSize: 11, valign: 'middle', fontFace: F.body } })));
+  s.addTable(tbl, { x: 3.95, y: 2.1, w: 8.78, colW: [1.7, 3.5, 3.58], rowH: 0.6, border: { type: 'solid', pt: 1, color: C.line }, margin: 0.08 });
 }
 
 /* 8 Distribution layer diagram */
 { const s = base(pres, 8);
   title(s, ['Every Telegram group becomes a ', ['Panta venue']]);
-  const groups = ['Football fan groups', 'Crypto trading chats', 'Campus and church groups', 'Influencer communities'];
+  const groups = ['BBNaija and reality-TV fans', 'Music and movie stans', 'Football and politics chats', 'Influencer communities'];
   groups.forEach((g, i) => { const y = 2.35 + i * 0.95;
     s.addShape('roundRect', { x: M, y, w: 3.4, h: 0.75, rectRadius: 0.1, fill: { color: i === 3 ? C.navy : C.panel } });
     tx(s, g, { x: M + 0.25, y: y + 0.22, w: 3.0, h: 0.35, fontSize: 15, color: 'FFFFFF', bold: i === 3 }); });
@@ -162,22 +165,23 @@ pres.author = 'Baheet Adeniji'; pres.title = 'Pot: prediction markets for your g
   gains.forEach((g, i) => { const y = 2.45 + i * 1.25;
     tx(s, g[0], { x: 10.6, y, w: 2.2, h: 0.35, fontFace: F.head, fontSize: 14, color: C.yellow });
     tx(s, g[1], { x: 10.6, y: y + 0.38, w: 2.2, h: 0.75, fontSize: 13 }); });
-  tx(s, 'Pot doesn\'t compete with Panta\'s website. It brings people to Panta from where they already spend time.', { x: M, y: 6.35, w: 12, h: 0.4, fontSize: 14, color: C.muted });
+  tx(s, 'Pot gives Panta distribution: it brings people to Panta from the chats where the debates already happen. Community owners earn the creator\'s cut.', { x: M, y: 6.35, w: 12, h: 0.4, fontSize: 14, color: C.muted });
 }
 
 /* 9 Honest status + traction placeholders */
 { const s = base(pres, 9);
-  title(s, ['Practice mode today. ', ['Live mode is one command away.']], { fontSize: 30 });
+  title(s, ['An honest sandbox submission. ', ['Live is one switch away.']], { fontSize: 28 });
   const hdr = (t) => ({ text: t, options: { bold: true, color: C.bg, fill: { color: C.yellow }, fontFace: F.head, fontSize: 14, valign: 'middle' } });
   const cell = (t, i, o) => ({ text: t, options: Object.assign({ color: C.ink, fill: { color: i % 2 ? C.bg : C.panel }, fontSize: 12, fontFace: F.body, valign: 'middle' }, o || {}) });
   const rows = [['', 'Practice (running now)', 'Live (built, switched off)'],
     ['Money', 'None. Wallets sign a free message', 'Real USDC on Solana'],
     ['Markets', 'Tracked by Pot with Panta\'s payout rules', 'Created on Panta by the admin'],
     ['Result', 'Group admin runs /settle yes|no', 'Panta\'s own result, then receipt'],
-    ['Checked', 'Real people, real groups, real phones', 'Read-only calls to Panta\'s live API']];
+    ['Panta data', 'Real live Panta markets and prices in the chat (/panta)', 'Same, plus buys on them'],
+    ['Checked', 'Sandbox end-to-end script; real groups and phones', 'Read-only live probe (live-probe.mts)']];
   s.addTable(rows.map((r, i) => i === 0 ? r.map(hdr) : r.map((t, j) => cell(t, i, j === 0 ? { bold: true, color: 'FFFFFF' } : {}))),
-    { x: M, y: 2.3, w: 7.4, colW: [1.3, 3.05, 3.05], rowH: 0.62, border: { type: 'solid', pt: 1, color: C.line }, margin: 0.1 });
-  tx(s, 'Switch: scripts/go-live.sh · Back: scripts/rollback-to-practice.sh', { x: M, y: 5.6, w: 7.4, h: 0.3, fontSize: 12, color: C.muted });
+    { x: M, y: 2.3, w: 7.4, colW: [1.3, 3.05, 3.05], rowH: 0.56, border: { type: 'solid', pt: 1, color: C.line }, margin: 0.1 });
+  tx(s, 'One switch: scripts/go-live.sh (GO-LIVE.md) · back: scripts/rollback-to-practice.sh. The demo video shows the live flow at launch.', { x: M, y: 5.85, w: 7.4, h: 0.5, fontSize: 12, color: C.muted });
   const tx0 = 8.6, tw = 4.13;
   s.addShape('rect', { x: tx0, y: 2.3, w: tw, h: 4.25, fill: { color: C.navy } });
   tx(s, 'Practice run with a real community', { x: tx0 + 0.3, y: 2.5, w: tw - 0.6, h: 0.7, fontFace: F.head, fontSize: 16, color: C.yellow });

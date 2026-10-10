@@ -104,3 +104,7 @@ Can only be checked with real money:
 - **Creation fee is final**: no refund, even if Panta cancels the market.
 - **Slow confirmations**: if Solana hasn't confirmed after about 20 seconds, the buyer sees "Check again" instead of
   paying twice. Pot records the buy once it's confirmed.
+
+## Note: PANTA_READ_KEY (already set, read-only)
+Production has `PANTA_READ_KEY` so practice mode can show real Panta markets (`/panta`, home page). It is used only by
+`livepanta.ts`, which can only send GETs. It does not turn on live mode or live writes; leave it in place when rolling back.

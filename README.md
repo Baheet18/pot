@@ -45,7 +45,7 @@ Only allowlisted POST paths can be called, and **with the live key every write i
 ## Run it locally
 ```bash
 npm install
-npm test                  # 165 tests: core, server (sandbox fixtures, fetch mocked), bot (fake Telegram updates)
+npm test                  # 177 tests: core, server (sandbox fixtures, fetch mocked), bot (fake Telegram updates)
 npm run typecheck
 npm run dev:web           # http://localhost:3100
 npm run dev:bot           # long polling (refuses to start while the hosted webhook is active)
