@@ -1,7 +1,7 @@
 import { formatReceiptHtml } from "@pot/core";
 import { rerenderReceipts } from "@pot/bot";
 import { getBot } from "@/lib/telegram";
-import { buildReceipt, buysForMarket, listPracticeMarkets, walletLinked, draftWithAI, getMarketView, getPracticeMarket, settlePracticeMarket, SANDBOX, saveDraft, sign, testDataSummary, upsertGroup, wipeTestData } from "@pot/server";
+import { liveSample, buildReceipt, buysForMarket, listPracticeMarkets, walletLinked, draftWithAI, getMarketView, getPracticeMarket, settlePracticeMarket, SANDBOX, saveDraft, sign, testDataSummary, upsertGroup, wipeTestData } from "@pot/server";
 
 export const maxDuration = 60;
 const DEMO_CHAT = -1000000000001; // not a real Telegram chat; removed by the wipe
@@ -20,7 +20,8 @@ export async function POST(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return new Response("unauthorized", { status: 401 });
   if (!SANDBOX) return Response.json({ error: "test mode only" }, { status: 400 });
-  const { confirm, demo, rules, settle, inspect, rerender } = (await req.json().catch(() => ({}))) as { confirm?: string; demo?: string; rules?: boolean; settle?: { id?: string; outcome?: string }; inspect?: string; rerender?: string };
+  const { confirm, demo, rules, settle, inspect, rerender, liveRaw } = (await req.json().catch(() => ({}))) as { liveRaw?: boolean; confirm?: string; demo?: string; rules?: boolean; settle?: { id?: string; outcome?: string }; inspect?: string; rerender?: string };
+  if (liveRaw) return Response.json({ sample: await liveSample() }); // operator: shape of the read-only live list (no secrets)
   const findId = async (x: string) => (x.length >= 8 ? (await listPracticeMarkets(500)).find((r) => r.id === x || r.id.startsWith(x))?.id ?? null : null);
   if (typeof inspect === "string") {
     const id = await findId(inspect);

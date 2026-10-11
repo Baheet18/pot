@@ -134,7 +134,7 @@ export function choiceKeyboard(c: DraftChoice): InlineKeyboard {
   return kb;
 }
 
-const draftKeyboard = (id: string, d: MarketDraft, problems: string[]) => {
+export const draftKeyboard = (id: string, d: MarketDraft, problems: string[]) => {
   const kb = new InlineKeyboard();
   if (!problems.length) kb.text(`✅ Create ($${d.creationFeeUsdc})`, `create:${id}`);
   return kb.text("❌ Cancel", `cancel:${id}`);

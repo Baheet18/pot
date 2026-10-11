@@ -78,3 +78,9 @@ export async function getLivePanta(id: string, now = Math.floor(Date.now() / 100
     return toLiveMarket(await liveGet(`/markets/${id}/`), now);
   } catch { return null; }
 }
+
+/** Operator diagnostics: the price/volume fields of the first few listed items (no secrets). */
+export async function liveSample() {
+  const d = await liveGet<{ items?: any[] }>("/markets/?limit=100");
+  return (d.items ?? []).slice(0, 3).map((x) => ({ id: String(x.marketId).slice(0, 6), phase: x.phase, yesPrice: x.yesPrice, noPrice: x.noPrice, primaryYesPrice: x.primaryYesPrice, totalVolumeUsdc: x.totalVolumeUsdc, volumeUsdc: x.volumeUsdc, keys: Object.keys(x).length }));
+}
