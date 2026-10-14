@@ -42,6 +42,28 @@ Only allowlisted POST paths can be called, and **with the live key every write i
 * `PANTA_MODE=test` (default, and what the public deployment runs today): **practice mode**. Markets a group creates are Pot-hosted practice markets with a simulated pool. Creating, buying and claiming ask the wallet to **sign a free message**, never a transaction; nothing is sent to any chain and no money moves. Admins settle practice markets with `/settle yes|no`. (Panta's `pk_test` sandbox is still used for `/post`-ed sandbox markets.)
 * `PANTA_MODE=live`: real mainnet markets with the live key; writes also need `POT_ALLOW_LIVE_WRITES=1`. Switch with `scripts/go-live.sh --yes-real-money <mainnet RPC>`; undo with `scripts/rollback-to-practice.sh`. See [GO-LIVE.md](GO-LIVE.md). `GET /api/pot/ready` (Bearer `CRON_SECRET`) lists which live settings are in place, names only.
 
+## Testing with TestSprite
+
+Pot is tested two ways: **208 unit tests** (Vitest, `npm test`) for the market logic, and an end-to-end suite generated in the [TestSprite](https://www.testsprite.com) 3.0 portal that runs against the live site **https://pot-navy.vercel.app** on every pull request through the TestSprite GitHub App.
+
+**What the TestSprite suite covers** (full plan: [`submission/testsprite/test-plan.md`](submission/testsprite/test-plan.md)):
+- **Pages:** home, market page `/m/<id>`, Blink page, claim page, leaderboard, link and create pages, 404s.
+- **Solana Actions / Blinks:** `actions.json`, CORS preflight, the action GET metadata, the practice buy POST and its chained `next` link.
+- **Buy API:** `/api/pot/buy/start` and `/finish`: happy path, $1/$500 boundaries, blank / zero / negative / over-max amounts, bad side, market, wallet and JSON.
+- **Security:** operator-only endpoints return 401 without the bearer secret; error bodies never leak config.
+
+<!-- TODO after setup in the portal: -->
+- **Test suite:** _<number> tests, <link or screenshot of the TestSprite portal suite>_
+- **PR check:** every PR runs the suite via the TestSprite GitHub App; **Blocking PRs: _<on/off>_** (merge is held until the check passes).
+- **Example PR where TestSprite caught a bug:** _<PR link>_ (failing run: _<link>_, passing run after the fix: _<link>_).
+
+Run the unit tests locally:
+
+```bash
+npm install
+npm test
+```
+
 ## Run it locally
 ```bash
 npm install
