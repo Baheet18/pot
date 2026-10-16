@@ -44,7 +44,7 @@ Only allowlisted POST paths can be called, and **with the live key every write i
 
 ## Testing with TestSprite
 
-Pot is tested two ways: **208 unit tests** (Vitest, `npm test`) for the market logic, and an end-to-end suite generated in the [TestSprite](https://www.testsprite.com) 3.0 portal that runs against the live site **https://pot-navy.vercel.app** on every pull request through the TestSprite GitHub App.
+Pot is tested two ways: **212 unit tests** (Vitest, `npm test`) for the market logic, and an end-to-end suite generated in the [TestSprite](https://www.testsprite.com) 3.0 portal that runs against the live site **https://pot-navy.vercel.app** on every pull request through the TestSprite GitHub App.
 
 **What the TestSprite suite covers** (full plan: [`submission/testsprite/test-plan.md`](submission/testsprite/test-plan.md)):
 - **Pages:** home, market page `/m/<id>`, Blink page, claim page, leaderboard, link and create pages, 404s.
@@ -55,6 +55,7 @@ Pot is tested two ways: **208 unit tests** (Vitest, `npm test`) for the market l
 <!-- TODO after setup in the portal: -->
 - **Test suite:** _<number> tests, <link or screenshot of the TestSprite portal suite>_
 - **PR check:** every PR runs the suite via the TestSprite GitHub App; **Blocking PRs: _<on/off>_** (merge is held until the check passes).
+- **CI:** GitHub Actions (`.github/workflows/ci.yml`, check `test`) runs typecheck + unit tests on every PR; the TestSprite trigger fires when that check completes.
 - **Example PR where TestSprite caught a bug:** _<PR link>_ (failing run: _<link>_, passing run after the fix: _<link>_).
 
 Run the unit tests locally:
