@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { runBotTicks } from "@/lib/telegram";
-import { actionHeaders, completedAction, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
+import { actionHeaders, completedAction, toNumber, SOLANA_DEVNET, SOLANA_MAINNET } from "@pot/core";
 import { actionIcon, DEFAULT_MARKET_IMAGE, finishBuy, finishBuyPractice, getMarketView, SANDBOX } from "@pot/server";
 import { errorResponse, str } from "@/lib/http";
 
@@ -15,7 +15,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const b = (await req.json().catch(() => ({}))) as { account?: unknown; signature?: unknown; data?: unknown };
     const common = {
       orderId: u.searchParams.get("orderId") ?? "", quoteId: u.searchParams.get("quoteId") ?? undefined, wallet: str(b.account),
-      marketId: id, side: (u.searchParams.get("side") === "no" ? "no" : "yes") as "yes" | "no", amountUsdc: Number(u.searchParams.get("amount")),
+      marketId: id, side: (u.searchParams.get("side") === "no" ? "no" : "yes") as "yes" | "no", amountUsdc: toNumber(u.searchParams.get("amount")),
       ref: u.searchParams.get("ref"), rs: u.searchParams.get("rs"), channel: "blink" as const,
     };
     // Practice mode: the blink client sends back the signed message (`data`) and its signature.

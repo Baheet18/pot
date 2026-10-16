@@ -85,11 +85,27 @@ export function marketActionGet(opts: {
   return { type: "action", icon: opts.icon, title: opts.title, description: desc, label: "Buy", links: { actions } };
 }
 
+/**
+ * Coerce a request value to a number. Blank or whitespace-only strings become NaN (Number("") is 0, which
+ * would otherwise slip through as a real amount). Non-number, non-string values are NaN too.
+ */
+export function toNumber(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v !== "string" || v.trim() === "") return NaN;
+  return Number(v.trim());
+}
+
+/** Why a USDC amount is unacceptable, or null when it's fine. Messages are shown to the user. */
+export function amountProblem(v: unknown): { code: "BAD_AMOUNT"; message: string } | null {
+  const n = toNumber(v);
+  if (Number.isNaN(n)) return { code: "BAD_AMOUNT", message: `Enter an amount between $${BLINK_MIN_USDC} and $${BLINK_MAX_USDC}` };
+  if (!Number.isFinite(n) || n < BLINK_MIN_USDC || n > BLINK_MAX_USDC) return { code: "BAD_AMOUNT", message: `Amount must be between $${BLINK_MIN_USDC} and $${BLINK_MAX_USDC}` };
+  return null;
+}
+
 export function parseAmount(v: string | null): number | null {
-  if (!v) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < BLINK_MIN_USDC || n > BLINK_MAX_USDC) return null;
-  return Math.round(n * 100) / 100;
+  if (v === null || amountProblem(v)) return null;
+  return Math.round(toNumber(v) * 100) / 100;
 }
 
 export function completedAction(icon: string, title: string, description: string): ActionGetResponse {
