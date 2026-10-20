@@ -1,7 +1,7 @@
 # Pot: TestSprite Season 4 submission
 
 ## What it is
-Pot is a Telegram bot (t.me/pantapotbot) that turns group-chat arguments into prediction markets. When friends argue ("Arsenal win Sunday", "BTC hits $100k by Friday"), Pot drafts a clear yes/no market on Panta (Solana), and anyone in the group can back a side from a market page or a Solana Blink. The leaderboard credits whoever's link brought in the buys, and the bot settles each market automatically. Receipts can be shared to X or Telegram in one tap. It runs in practice mode, where a buy is a free signed message and no real money moves.
+Pot is a Telegram bot (t.me/pantapotbot) that turns group-chat arguments into prediction markets. When friends argue ("Arsenal win Sunday", "BTC hits $100k by Friday"), Pot drafts a clear yes/no market on Panta (Solana), and anyone in the group can back a side from a market page or a Solana Blink. The leaderboard credits whoever's link brought in the buys, and a daily job settles markets. Receipts can be shared to X or Telegram in one tap. It runs in practice mode, where a buy is a free signed message and no real money moves.
 
 ## Links
 - Repo: https://github.com/Baheet18/pot
@@ -21,7 +21,7 @@ Pot is a Telegram bot (t.me/pantapotbot) that turns group-chat arguments into pr
 - Markets come straight out of group chat. No one has to open an app to start one.
 - Solana Blinks let people back a side from any link.
 - Group referral credit turns a market into a social game.
-- The bot settles markets itself using public data, such as ESPN fixtures for sports.
+- For sports, the bot looks up the real fixture (ESPN public scoreboard) so the market matches the actual game.
 - A testing tool checks a crypto app end to end against its live URL, with merges blocked on failure.
 
 ## X post draft
