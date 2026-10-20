@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { fmtPrice, fmtTime, fmtUsd, parseAmount } from "@pot/core";
+import { fmtPrice, fmtTime, fmtUsd, parseAmount, receiptShareText, receiptXShareUrl } from "@pot/core";
+import { ReceiptShare } from "@/components/ReceiptShare";
 import { blinkPreviewFor, buildReceipt, getMarketView, groupTitle, marketUrl, ogImageFor, resolveRef, shareTextFor, WEB_URL, signRef, xShareFor } from "@pot/server";
 import { SplitBar } from "@/components/SplitBar";
 import { BuyPanel } from "@/components/BuyPanel";
@@ -105,6 +106,7 @@ export default async function MarketPage({ params, searchParams }: Props) {
             <p className="text-xs text-stone-400">{receipt.feeRate > 0
               ? `≈ approx. Net includes Panta's ${Math.round(receipt.feeRate * 100)}% trading fee. Panta sets final payouts after its 1-hour dispute window; winners claim in Pot (/mine in the bot).`
               : "≈ approx, using Panta's payout rules (winners split the pot minus the creator royalty, pro rata by shares). Practice money only: nothing to claim."}</p>
+            <ReceiptShare url={shareLink} text={receiptShareText({ title: m.title, outcome: receipt.outcome, practice: receipt.practice })} xUrl={receiptXShareUrl({ title: m.title, outcome: receipt.outcome, practice: receipt.practice }, shareLink)} />
           </div>
         )}
         <div className="card space-y-2 p-5 text-sm">

@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
-import { esc, findDeadline, fmtWat, formatReceiptHtml, receiptDue, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
+import { esc, receiptShareText, telegramShareUrl, findDeadline, fmtWat, formatReceiptHtml, receiptDue, renderCard, validateDraft, type Card, type Ref, type MarketDraft } from "@pot/core";
 import {
   allGroupMarkets, getDraft, getMarketView, getPositions, groupLeaderboard, groupMarkets, isMarketId, isPublicHttps, linkGroupMarket,
   marketUrl, practicePositions, topPeople, walletOwnerName, claimNotify, claimPhase, memberName, saveDraft, setGroupMarketState, sign, SANDBOX, unnotifiedBuys, updateDraft, upsertGroup, upsertMember,
@@ -654,6 +654,13 @@ export async function notifyTick(bot: Bot) {
   }
 }
 
+/** "Full receipt" + "Share" (Telegram share sheet) buttons; links need a public https web URL. */
+function receiptKeyboard(marketId: string, chatId: number, r: { title: string; outcome: "yes" | "no"; practice: boolean }) {
+  if (!isPublicHttps()) return undefined;
+  const url = marketUrl(marketId, { kind: "group", chatId });
+  return new InlineKeyboard().url("Full receipt", url).url("📤 Share", telegramShareUrl(url, receiptShareText(r)));
+}
+
 /**
  * Posts one settlement receipt per market per group. Idempotent: the receipts table claim (market, chat) wins once;
  * if sending fails the claim is released so a later tick retries. Groups with no buys only get one if they created it.
@@ -668,7 +675,7 @@ export async function postReceipt(api: Bot["api"], chatId: number, view: MarketV
     }
     if (!(await claimReceipt(id, chatId))) return "already";
     try {
-      const kb = isPublicHttps() ? new InlineKeyboard().url("Full receipt", marketUrl(id, { kind: "group", chatId })) : undefined;
+      const kb = receiptKeyboard(id, chatId, receipt);
       const msg = await api.sendMessage(chatId, formatReceiptHtml(receipt), { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
       await setReceiptMessage(id, chatId, msg.message_id);
       await setGroupMarketState(chatId, id, { settled_notified: 1, last_phase: "resolved" });
@@ -692,8 +699,9 @@ export async function rerenderReceipts(api: Bot["api"], marketId: string): Promi
     const chatId = Number(g.chat_id);
     const r = await receiptFor(marketId, chatId);
     if (!r?.message_id) continue;
-    const text = formatReceiptHtml(await buildReceipt(view, { chatId }));
-    const kb = isPublicHttps() ? new InlineKeyboard().url("Full receipt", marketUrl(marketId, { kind: "group", chatId })) : undefined;
+    const rc = await buildReceipt(view, { chatId });
+    const text = formatReceiptHtml(rc);
+    const kb = receiptKeyboard(marketId, chatId, rc);
     try {
       await api.editMessageText(chatId, Number(r.message_id), text, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
       n++;
