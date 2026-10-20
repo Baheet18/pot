@@ -52,11 +52,11 @@ Pot is tested two ways: **212 unit tests** (Vitest, `npm test`) for the market l
 - **Buy API:** `/api/pot/buy/start` and `/finish`: happy path, $1/$500 boundaries, blank / zero / negative / over-max amounts, bad side, market, wallet and JSON.
 - **Security:** operator-only endpoints return 401 without the bearer secret; error bodies never leak config.
 
-<!-- TODO after setup in the portal: -->
-- **Test suite:** _<number> tests, <link or screenshot of the TestSprite portal suite>_
-- **PR check:** every PR runs the suite via the TestSprite GitHub App; **Blocking PRs: _<on/off>_** (merge is held until the check passes).
-- **CI:** GitHub Actions (`.github/workflows/ci.yml`, check `test`) runs typecheck + unit tests on every PR; the TestSprite trigger fires when that check completes.
-- **Example PR where TestSprite caught a bug:** _<PR link>_ (failing run: _<link>_, passing run after the fix: _<link>_).
+**Results so far:**
+- **TestSprite:** 4/4 tests passing against the live site on [PR #1](https://github.com/Baheet18/pot/pull/1) (share receipts + blank-amount fix). [Run details](https://www.testsprite.com/dashboard-v3/o/415350c9-f7ec-5282-be9e-1aafce445cb7/projects/6f7b3451-bae0-4dd0-a8c3-10a05930615e/execution/003980a8-7c5e-47ad-9f1a-cef0996bb640).
+- **PR check:** every PR runs the TestSprite suite as the `TestSprite V3` status check via the TestSprite GitHub App. **Blocking PRs: on**, so a PR can't merge until it passes.
+- **CI:** GitHub Actions (`.github/workflows/ci.yml`, check `test`) runs typecheck + all 212 unit tests (19 files) on every PR and push to main.
+- **Honest note:** the TestSprite suite is small (4 tests) for now; the plan above lists the wider scope we're growing it toward.
 
 Run the unit tests locally:
 
@@ -68,7 +68,7 @@ npm test
 ## Run it locally
 ```bash
 npm install
-npm test                  # 177 tests: core, server (sandbox fixtures, fetch mocked), bot (fake Telegram updates)
+npm test                  # 212 tests: core, server (sandbox fixtures, fetch mocked), bot (fake Telegram updates)
 npm run typecheck
 npm run dev:web           # http://localhost:3100
 npm run dev:bot           # long polling (refuses to start while the hosted webhook is active)
