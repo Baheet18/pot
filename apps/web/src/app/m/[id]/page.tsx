@@ -7,6 +7,7 @@ import { SplitBar } from "@/components/SplitBar";
 import { BuyPanel } from "@/components/BuyPanel";
 import { PoweredByPanta } from "@/components/PoweredByPanta";
 import { LIVE_WRITES, RPC_URL, SANDBOX, sp } from "@/lib/ui";
+import { MARKET_GRID } from "@/lib/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,7 @@ export default async function MarketPage({ params, searchParams }: Props) {
   const group = v.practice && v.chatId !== null ? await groupTitle(v.chatId).catch(() => null) : null;
   const closes = v.sandbox && !v.practice ? "open (sandbox)" : fmtTime(m.primaryPhaseEndTime ?? m.startTime);
   return (
-    <div className="grid gap-6 md:grid-cols-[1fr_380px]">
+    <div className={MARKET_GRID}>
       <div className="space-y-5">
         <div>
           {v.practice && <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-sky-400/40 bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-200">🧪 Practice market · no real money{group ? ` · made in ${group}` : ""}</div>}
