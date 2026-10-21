@@ -2,6 +2,7 @@ import { fmtTime, fmtWat } from "@pot/core";
 import { getDraft, groupTitle, verify } from "@pot/server";
 import { CreatePanel } from "@/components/CreatePanel";
 import { LIVE_WRITES, RPC_URL, SANDBOX, sp } from "@/lib/ui";
+import { CREATE_GRID } from "@/lib/layout";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function CreatePage({ params, searchParams }: { params: Pro
   if (!row) return <div className="card mx-auto max-w-lg p-6"><h1 className="text-xl font-bold">This create link has expired</h1><p className="mt-2 text-stone-300">Go back to your group and tap ✅ Create again.</p></div>;
   const d = row.draft;
   return (
-    <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-[1fr_340px]">
+    <div className={CREATE_GRID}>
       <div className="card space-y-3 p-6">
         <div className="text-xs uppercase tracking-wide text-stone-400">New market for {await groupTitle(row.chat_id) ?? "your group"} · {d.marketType} · {d.category}</div>
         <h1 className="text-2xl font-black">{d.title}</h1>
