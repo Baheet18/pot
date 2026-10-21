@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { getMarketView } from "@pot/server";
 import { ClaimPanel } from "@/components/ClaimPanel";
 import { LIVE_WRITES, RPC_URL, SANDBOX, sp } from "@/lib/ui";
@@ -9,11 +10,14 @@ export default async function ClaimPage({ params, searchParams }: { params: Prom
   const q = await searchParams;
   const kind = sp(q.kind) === "creator" ? "creator" : "win";
   const v = await getMarketView(id).catch(() => null);
+  // An unknown or cleared market has nothing to claim: show the shared "Market not found" page (404) like /m/<id>,
+  // instead of a claim form titled with the raw id and a wallet button.
+  if (!v) notFound();
   return (
     <div className="card mx-auto max-w-lg space-y-3 p-6">
       <h1 className="text-xl font-bold">{kind === "win" ? "Claim winnings" : "Claim creator royalty"}</h1>
-      <p className="text-stone-300">{v?.market.title ?? id}</p>
-      {v && kind === "creator" && <p className="text-sm text-stone-400">Estimated royalty: about ${v.royalty.estimatedUsdc.toFixed(2)} ({(v.royalty.royaltyBps / 100).toFixed(0)}%). {v.royalty.note}</p>}
+      <p className="text-stone-300">{v.market.title}</p>
+      {kind === "creator" && <p className="text-sm text-stone-400">Estimated royalty: about ${v.royalty.estimatedUsdc.toFixed(2)} ({(v.royalty.royaltyBps / 100).toFixed(0)}%). {v.royalty.note}</p>}
       <ClaimPanel marketId={id} kind={kind} sandbox={SANDBOX} liveWrites={LIVE_WRITES} rpc={RPC_URL} />
     </div>
   );
